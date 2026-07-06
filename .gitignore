@@ -1,0 +1,51 @@
+# ==================== 通用 ====================
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+docs/
+
+# 编辑器和 IDE
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+*~
+
+
+# ==================== Node.js / React 前端 ====================
+
+# 依赖
+node_modules/
+package-lock.json
+
+# 构建产物
+/build
+/dist
+/output
+
+
+# Markdown 文件
+*.md
+!/README.md
+
+
+# 临时备份文件
+*.bak
+*.tmp
+*.temp
+*.orig
+
+# Docker
+.dockerignore
+
+# Codex temporary compile output
+.codex-tmp/
+
