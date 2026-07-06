@@ -1,37 +1,62 @@
-# Schema Recovery Agent
+﻿# Schema Recovery Agent
 
-智能数据库 Schema 逆向工程 Agent — 无需外键约束，无需文档，通过多 Agent 协作自动还原数据库表间关系，每条关系附带可追溯的证据链。
+一个用于老旧数据库关系逆向恢复的 Agent 项目。后端通过 MCP 工具扫描表、列、视图、存储过程和 MyBatis XML，再用多 Worker + LangGraph 编排生成 ER 关系、证据链和置信度。
 
-## 核心能力
+## 目录结构
 
-| 能力 | 说明 |
-|------|------|
-| 自动数据库扫描 | 连接目标数据库，自动发现所有表、视图、存储过程、触发器 |
-| 多维度关系推理 | 列名分析 + 命名约定 + SQL JOIN 解析 + ORM 配置解析 → 加权融合 |
-| 证据溯源 | 每条关系标注来源（哪条 SQL、哪个 ORM 配置），可人工复核 |
-| 置信度分级 | 高置信度（≥0.7）/ 中置信度（0.4-0.7）/ 低置信度（<0.4） |
-| 闭环监控 | 记录每次分析性能，追踪各证据源贡献率 |
-
-## 架构
-
-```
-SurveyWorker (数据库初勘)
-    ↓
-ColumnWorker + NameWorker (列分析 + 命名分析)
-    ↓
-CodeWorker + ORMWorker (SQL代码解析 + ORM配置解析)
-    ↓
-MergeWorker (证据融合 → ER图)
+```text
+backend/   FastAPI、LangGraph、Worker、MCP 工具、评测和监控
+frontend/  React + Vite 可视化控制台
+data/      模拟数据库、ORM XML、评测集
+docs/      设计文档和开发方案
 ```
 
-## 快速开始
+## 配置
+
+运行配置放在根目录 `.env`，该文件不会提交到 Git。仓库提交 `.env.example` 作为模板。
+
+首次运行：
+
+```bash
+cp .env.example .env
+```
+
+Windows PowerShell：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+## 后端能力
+
+- LangGraph 主编排，手写 Orchestrator 作为 fallback
+- `/api/analyze` 一次性分析
+- `/api/analyze/stream` NDJSON 流式节点进度
+- 证据融合输出 `confidence_reason`、协同加成和冲突惩罚
+- Monitor 记录 Worker 耗时、工具调用和证据源贡献
+- Eval 计算 exact precision/recall、partial FK recall、目标表错误、关系类型错误和高置信度校准
+
+## Docker 快速开始
 
 ```bash
 docker compose up -d
-python scripts/init_db.py
 curl -X POST http://localhost:8080/api/analyze
 ```
 
-## 技术栈
+## 本地后端运行
 
-Python FastAPI / MySQL 8.0 / SQLite / sqlparse / Docker
+```bash
+uv sync
+python -m backend.scripts.init_db
+uv run uvicorn backend.main:app --host 0.0.0.0 --port 8080
+```
+
+## 本地前端运行
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+

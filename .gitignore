@@ -1,15 +1,16 @@
-# ==================== 通用 ====================
-
-# 操作系统文件
+﻿# OS files
 .DS_Store
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-docs/
+# Local configuration
+.env
+!.env.example
 
-# 编辑器和 IDE
+# Editors and IDEs
 .idea/
+.jbeval/
 .vscode/
 *.suo
 *.ntvs*
@@ -19,33 +20,30 @@ docs/
 *.swo
 *~
 
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
 
-# ==================== Node.js / React 前端 ====================
-
-# 依赖
+# Node.js / React
 node_modules/
 package-lock.json
+frontend/dist/
+frontend/build/
 
-# 构建产物
-/build
-/dist
-/output
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
 
-
-# Markdown 文件
-*.md
-!/README.md
-
-
-# 临时备份文件
+# Temporary files
 *.bak
 *.tmp
 *.temp
 *.orig
+.codex-tmp/
 
 # Docker
 .dockerignore
-
-# Codex temporary compile output
-.codex-tmp/
-

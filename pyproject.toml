@@ -1,0 +1,28 @@
+﻿[project]
+name = "schema-recovery-agent"
+version = "1.0.0"
+description = "Schema recovery agent with FastAPI, LangGraph, MCP-style tools, monitoring, and evaluation."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.*",
+    "uvicorn[standard]==0.32.*",
+    "pymysql==1.1.*",
+    "sqlalchemy==2.0.*",
+    "cryptography==44.*",
+    "pydantic==2.*",
+    "pydantic-settings==2.*",
+    "python-dotenv==1.*",
+    "httpx==0.28.*",
+    "sqlparse==0.5.*",
+    "openai==1.*",
+    "langgraph>=0.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.*",
+]
+
+[tool.uv]
+package = false

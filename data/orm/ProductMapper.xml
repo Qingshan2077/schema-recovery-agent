@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.mapper.ProductMapper">
+  <resultMap id="productResultMap" type="com.example.model.Product">
+    <id property="id" column="id"/>
+    <result property="name" column="name"/>
+    <association property="category" javaType="com.example.model.Category"
+                 column="category_id" select="com.example.mapper.CategoryMapper.selectById"/>
+    <collection property="skus" ofType="com.example.model.ProductSku"
+                column="id" select="com.example.mapper.ProductSkuMapper.selectByProductId"/>
+    <collection property="reviews" ofType="com.example.model.Review"
+                column="id" select="com.example.mapper.ReviewMapper.selectByProductId"/>
+  </resultMap>
+</mapper>

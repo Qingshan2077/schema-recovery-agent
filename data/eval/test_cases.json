@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "project": "Schema Recovery Agent",
+    "version": "1.0",
+    "description": "Expected relations for the 30-table e-commerce schema."
+  },
+  "expected_relations": [
+    {"id": "ER-001", "source_table": "user_profiles", "fk_column": "user_id", "target_table": "users", "pk_column": "id", "relation_type": "1:1"},
+    {"id": "ER-002", "source_table": "user_addresses", "fk_column": "user_id", "target_table": "users", "pk_column": "id", "relation_type": "1:N"},
+    {"id": "ER-003", "source_table": "user_roles", "fk_column": "user_id", "target_table": "users", "pk_column": "id", "relation_type": "N:N"},
+    {"id": "ER-004", "source_table": "user_roles", "fk_column": "role_id", "target_table": "roles", "pk_column": "id", "relation_type": "N:N"},
+    {"id": "ER-005", "source_table": "orders", "fk_column": "user_id", "target_table": "users", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-006", "source_table": "order_payments", "fk_column": "order_id", "target_table": "orders", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-007", "source_table": "order_shipments", "fk_column": "order_id", "target_table": "orders", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-008", "source_table": "order_shipments", "fk_column": "shipping_company_id", "target_table": "shipping_companies", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-009", "source_table": "order_items", "fk_column": "order_id", "target_table": "orders", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-010", "source_table": "order_items", "fk_column": "product_id", "target_table": "products", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-011", "source_table": "products", "fk_column": "category_id", "target_table": "categories", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-012", "source_table": "product_sku", "fk_column": "product_id", "target_table": "products", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-013", "source_table": "product_images", "fk_column": "product_id", "target_table": "products", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-014", "source_table": "inventory", "fk_column": "product_id", "target_table": "products", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-015", "source_table": "inventory", "fk_column": "warehouse_id", "target_table": "warehouses", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-016", "source_table": "warehouse_stock", "fk_column": "warehouse_id", "target_table": "warehouses", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-017", "source_table": "warehouse_stock", "fk_column": "product_id", "target_table": "products", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-018", "source_table": "supplier_products", "fk_column": "supplier_id", "target_table": "suppliers", "pk_column": "id", "relation_type": "N:N"},
+    {"id": "ER-019", "source_table": "supplier_products", "fk_column": "product_id", "target_table": "products", "pk_column": "id", "relation_type": "N:N"},
+    {"id": "ER-020", "source_table": "reviews", "fk_column": "product_id", "target_table": "products", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-021", "source_table": "reviews", "fk_column": "user_id", "target_table": "users", "pk_column": "id", "relation_type": "N:1"},
+    {"id": "ER-022", "source_table": "cart_items", "fk_column": "user_id", "target_table": "users", "pk_column": "id", "relation_type": "N:1"}
+  ]
+}

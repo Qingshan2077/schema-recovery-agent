@@ -1,0 +1,57 @@
+﻿version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: schema_recovery_mysql
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports:
+      - "${MYSQL_HOST_PORT}:${MYSQL_CONTAINER_PORT}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./data/sim_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./data/sim_sp.sql:/docker-entrypoint-initdb.d/02_sp.sql
+      - ./data/seed_data.sql:/docker-entrypoint-initdb.d/03_seed.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  agent:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: schema_recovery_agent
+    env_file:
+      - .env
+    ports:
+      - "${API_PORT}:${API_PORT}"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: ${MYSQL_CONTAINER_PORT}
+      DATA_DIR: ${DOCKER_DATA_DIR}
+    volumes:
+      - ./data:${DOCKER_DATA_DIR}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: schema_recovery_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - agent
+    restart: unless-stopped
+
+volumes:
+  mysql_data:

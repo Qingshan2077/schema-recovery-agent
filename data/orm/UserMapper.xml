@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.mapper.UserMapper">
+  <resultMap id="userResultMap" type="com.example.model.User">
+    <id property="id" column="id"/>
+    <result property="username" column="username"/>
+    <association property="profile" javaType="com.example.model.UserProfile"
+                 column="id" select="com.example.mapper.UserProfileMapper.selectByUserId"/>
+    <collection property="addresses" ofType="com.example.model.UserAddress"
+                column="id" select="com.example.mapper.UserAddressMapper.selectByUserId"/>
+    <collection property="orders" ofType="com.example.model.Order"
+                column="id" select="com.example.mapper.OrderMapper.selectByUserId"/>
+  </resultMap>
+</mapper>
