@@ -1,38 +1,37 @@
 # Schema Recovery Agent
 
-智能数据库 Schema 逆向工程 Agent — 连上无外键约束、无文档的老数据库，自动推理出完整的表间关系图，每一条关系附带证据链和置信度。
+智能数据库 Schema 逆向工程 Agent — 无需外键约束，无需文档，通过多 Agent 协作自动还原数据库表间关系，每条关系附带可追溯的证据链。
+
+## 核心能力
+
+| 能力 | 说明 |
+|------|------|
+| 自动数据库扫描 | 连接目标数据库，自动发现所有表、视图、存储过程、触发器 |
+| 多维度关系推理 | 列名分析 + 命名约定 + SQL JOIN 解析 + ORM 配置解析 → 加权融合 |
+| 证据溯源 | 每条关系标注来源（哪条 SQL、哪个 ORM 配置），可人工复核 |
+| 置信度分级 | 高置信度（≥0.7）/ 中置信度（0.4-0.7）/ 低置信度（<0.4） |
+| 闭环监控 | 记录每次分析性能，追踪各证据源贡献率 |
 
 ## 架构
 
-6 个 Worker 流水线编排：
-
-1. **SurveyWorker** — 扫描数据库全部对象（表/视图/存储过程/ORM 配置）
-2. **ColumnWorker** — 逐表分析列名、类型、索引，推测潜在外键
-3. **NameWorker** — 跨表分析命名模式，识别关联表
-4. **CodeWorker** — 解析存储过程/视图中的 JOIN 语句（最高质量证据）
-5. **ORMWorker** — 解析 MyBatis XML 中的关系定义
-6. **MergeWorker** — 加权融合所有证据，输出 ER 图
-
-## 六大考点
-
-| 考点 | 体现 |
-|------|------|
-| 三路意图识别 | NameWorker 的关联表检测 / Router 的分发决策 |
-| MCP 工具调用 | 15+ 工具，查询改写 + 结果重排 |
-| 三级记忆 | L1 会话 / L2 跨分析 Schema / L3 全局设计模式 |
-| 多 Agent 路由 | 4 阶段流水线，并行 + 串行混合调度 |
-| Monitor 闭环 | 证据源贡献率跟踪 → 权重调整建议 |
-| 端到端评测 | 30 表测试集，查全率/查准率/F1 + LLM-as-Judge |
+```
+SurveyWorker (数据库初勘)
+    ↓
+ColumnWorker + NameWorker (列分析 + 命名分析)
+    ↓
+CodeWorker + ORMWorker (SQL代码解析 + ORM配置解析)
+    ↓
+MergeWorker (证据融合 → ER图)
+```
 
 ## 快速开始
 
 ```bash
 docker compose up -d
 python scripts/init_db.py
-# 启动后：
 curl -X POST http://localhost:8080/api/analyze
 ```
 
-## 开发文档
+## 技术栈
 
-见 `docs/` 目录下的 5 份文档，按编号顺序喂给 GPT 生成代码。
+Python FastAPI / MySQL 8.0 / SQLite / sqlparse / Docker
