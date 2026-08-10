@@ -47,3 +47,6 @@ frontend/build/
 
 # Docker
 .dockerignore
+
+# Project docs (keep local, not in git)
+docs/
