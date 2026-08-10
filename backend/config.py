@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     RUNTIME_IDENTITY_V2: bool = True
     STREAM_EVENTS_V2: bool = True
     QA_REGEX_BASELINE_FIX: bool = True
+    QA_AGENT_V2: str = "enabled"
+    QA_MAX_TOOL_CALLS: int = 6
+    QA_MAX_TOOL_ROUNDS: int = 2
+    QA_MAX_CONTEXT_MESSAGES: int = 12
+    QA_MAX_QUESTION_CHARS: int = 4000
+    QA_CHAT_DB_PATH: str = "data/chat/chat.db"
     TENANT_ID: str = "default"
     PROJECT_ID: str = "default"
     EVAL_REPORT_DIR: str = "data/eval/reports"
@@ -148,6 +154,12 @@ class Config:
     RUNTIME_IDENTITY_V2 = settings.RUNTIME_IDENTITY_V2
     STREAM_EVENTS_V2 = settings.STREAM_EVENTS_V2
     QA_REGEX_BASELINE_FIX = settings.QA_REGEX_BASELINE_FIX
+    QA_AGENT_V2 = settings.QA_AGENT_V2
+    QA_MAX_TOOL_CALLS = settings.QA_MAX_TOOL_CALLS
+    QA_MAX_TOOL_ROUNDS = settings.QA_MAX_TOOL_ROUNDS
+    QA_MAX_CONTEXT_MESSAGES = settings.QA_MAX_CONTEXT_MESSAGES
+    QA_MAX_QUESTION_CHARS = settings.QA_MAX_QUESTION_CHARS
+    QA_CHAT_DB_PATH = settings.QA_CHAT_DB_PATH
     TENANT_ID = settings.TENANT_ID
     PROJECT_ID = settings.PROJECT_ID
     EVAL_REPORT_DIR = settings.EVAL_REPORT_DIR

@@ -51,3 +51,4 @@ frontend/build/
 docs/
 *.md
 !README.md
+!backend/agent/prompts/**/*.md

@@ -1,12 +1,14 @@
-import { Bot, CheckCircle2, DatabaseZap, Send, ShieldAlert, User, X } from "lucide-react";
+import { Bot, DatabaseZap, Send, ShieldAlert, User, X } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import { useI18n } from "../i18n/LanguageContext";
 import type { ChatMessage } from "../types/api";
+import type { QAOutput } from "../types/api";
+import { ArtifactRenderer, CitationList } from "../components/Chat/QAArtifacts";
 
 export function ChatPage() {
   const { t } = useI18n();
-  const { messages, pendingOperation, loading, error, sendMessage, confirmPending, cancelPending } = useChat();
+  const { messages, loading, error, activeRunId, activity, sendMessage, cancelRun } = useChat();
   const [draft, setDraft] = useState("");
 
   const handleSubmit = (event: FormEvent) => {
@@ -36,26 +38,11 @@ export function ChatPage() {
               <p>{t("assistantReady")}</p>
             </div>
           ) : (
-            messages.map((message, index) => <ChatBubble message={message} key={`${message.role}-${index}`} />)
+            messages.map((message, index) => <ChatBubble message={message} onSelectEntity={(name, intent) => void sendMessage(buildClarificationReply(name, intent))} key={message.messageId ?? `${message.role}-${index}`} />)
           )}
         </div>
 
-        {pendingOperation ? (
-          <div className="chat-confirmation-bar">
-            <div>
-              <strong>{t("confirmationRequired")}</strong>
-              <span>{String(pendingOperation.sql_type ?? "").toUpperCase() === "DROP" ? t("safetyDangerous") : t("safetyConfirm")}</span>
-            </div>
-            <button className="primary-button" type="button" onClick={() => void confirmPending()} disabled={loading}>
-              <CheckCircle2 size={16} />
-              {t("confirmExecution")}
-            </button>
-            <button className="secondary-button" type="button" onClick={cancelPending} disabled={loading}>
-              <X size={16} />
-              {t("cancel")}
-            </button>
-          </div>
-        ) : null}
+        {activeRunId ? <div className="chat-confirmation-bar"><div><strong>{activity ?? "Agent 正在处理"}</strong><span>{activeRunId}</span></div><button className="secondary-button" type="button" onClick={() => void cancelRun()}><X size={16} />{t("cancel")}</button></div> : null}
 
         <form className="chat-input-row" onSubmit={handleSubmit}>
           <textarea
@@ -74,14 +61,19 @@ export function ChatPage() {
   );
 }
 
-function ChatBubble({ message }: { message: ChatMessage }) {
+function ChatBubble({ message, onSelectEntity }: { message: ChatMessage; onSelectEntity: (name: string, intent: string) => void }) {
   const { t } = useI18n();
   const isUser = message.role === "user";
+  const structured = message.structured as QAOutput | undefined;
   return (
     <article className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"}`}>
       <div className="chat-avatar">{isUser ? <User size={16} /> : message.type === "confirmation" ? <ShieldAlert size={16} /> : <Bot size={16} />}</div>
       <div className="chat-content">
         <pre>{message.content}</pre>
+        {structured?.clarification_question ? <div className="qa-clarification"><ShieldAlert size={16} /><span>{structured.clarification_question}</span></div> : null}
+        {structured?.entities?.flatMap((entity) => entity.candidates ?? []).length ? <div className="qa-entity-options">{structured.entities.flatMap((entity) => entity.candidates ?? []).map((candidate) => <button className="secondary-button" type="button" key={candidate.entity_id} onClick={() => onSelectEntity(candidate.name, structured.intent)}>{candidate.name}</button>)}</div> : null}
+        {structured?.artifacts?.map((artifact) => <ArtifactRenderer artifact={artifact} key={artifact.artifact_id} />)}
+        {structured?.citations ? <CitationList citations={structured.citations} /> : null}
         {message.ddlExecuted ? (
           <div className="chat-ddl-result">
             <DatabaseZap size={16} />
@@ -96,4 +88,11 @@ function ChatBubble({ message }: { message: ChatMessage }) {
 
 function translateKnownError(error: string | undefined, source: string, target: string): string | undefined {
   return error?.replace(source, target);
+}
+
+function buildClarificationReply(table: string, intent: string): string {
+  if (intent === "table_metadata") return `${table} 表的元数据是什么？`;
+  if (intent === "indexes") return `${table} 表有哪些索引？`;
+  if (intent === "relations" || intent === "evidence_explain") return `${table} 表有哪些关系证据？`;
+  return `${table} 表有哪些字段？`;
 }

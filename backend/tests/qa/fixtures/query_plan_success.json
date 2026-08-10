@@ -1,0 +1,9 @@
+{
+  "intent": "table_columns",
+  "entities": [{"mention": "products", "kind": "table", "parent_mention": null}],
+  "required_information": ["ordered columns"],
+  "suggested_tools": ["catalog.query_table_columns"],
+  "clarification_question": null,
+  "language": "zh-CN",
+  "plan_summary": "Resolve products and read its ordered column catalog."
+}

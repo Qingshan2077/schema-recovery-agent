@@ -2,16 +2,43 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+from threading import Thread
+from typing import TYPE_CHECKING, Any
 
 from backend.agent.workers.base import BaseWorker
 from backend.config import Config
 
+if TYPE_CHECKING:
+    from backend.agent.qa.agent import QAAgent
+
 
 class QAWorker(BaseWorker):
-    """Answer schema questions using registered database and memory tools."""
+    """v1 compatibility adapter; rules remain only as an explicit degraded fallback."""
+
+    def __init__(self, *args: Any, qa_agent: "QAAgent | None" = None, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.qa_agent = qa_agent
 
     def run(self, context: dict) -> dict:
+        if self.qa_agent is not None and self.run_context is not None:
+            result = _await_sync(self.qa_agent.run(
+                question=str(context.get("question") or ""),
+                run_context=self.run_context.for_agent("qa"),
+                messages=list(context.get("messages") or []),
+            ))
+            output = result.output
+            return {
+                "status": result.status.value,
+                "answer": output.get("answer") or output.get("clarification_question") or (result.error.message if result.error else ""),
+                "intent": output.get("intent", "unknown"),
+                "data": output,
+                "agent_run_result": result.model_dump(mode="json"),
+            }
+        return self._run_degraded_rules(context)
+
+    def _run_degraded_rules(self, context: dict) -> dict:
         question = context.get("question", "")
         intent = self._classify_question(question)
         data = self._execute_intent(intent, question)
@@ -129,4 +156,25 @@ class QAWorker(BaseWorker):
             names.append(candidate)
             seen.add(lower)
         return names
+
+
+def _await_sync(awaitable):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+    outcome: dict[str, Any] = {}
+
+    def runner() -> None:
+        try:
+            outcome["result"] = asyncio.run(awaitable)
+        except BaseException as exc:
+            outcome["error"] = exc
+
+    thread = Thread(target=runner, name="qa-worker-v2-bridge", daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["result"]
 

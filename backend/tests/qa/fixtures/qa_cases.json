@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {
+      "case_id": "columns-zh-ascii-adjacent",
+      "question": "products表有哪些字段",
+      "expected_intent": "table_columns",
+      "expected_entities": ["products"],
+      "required_artifact": "column_table"
+    },
+    {
+      "case_id": "missing-table-clarification",
+      "question": "这个表有哪些字段",
+      "expected_intent": "table_columns",
+      "expected_status": "blocked"
+    },
+    {
+      "case_id": "ambiguous-table",
+      "question": "product 的字段是什么",
+      "expected_intent": "table_columns",
+      "expected_status": "blocked"
+    }
+  ]
+}

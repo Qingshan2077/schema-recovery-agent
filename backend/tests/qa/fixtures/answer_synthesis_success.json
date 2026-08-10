@@ -1,0 +1,7 @@
+{
+  "answer": "表 products 包含 1 个字段。",
+  "claims": [{"claim_id": "claim_products_columns", "text": "表 products 包含 1 个字段。", "fact_ids": ["fact_products_id"]}],
+  "citations": [{"citation_id": "cit_products_columns", "claim_id": "claim_products_columns", "fact_ids": ["fact_products_id"], "label": "catalog", "locator": {"tool_call_ids": ["tcall_products"], "fact_locators": [{"table": "products", "column": "id"}]}}],
+  "artifacts": [{"artifact_id": "art_products_columns", "type": "column_table", "title": "products columns", "data": {"table": "products", "columns": [{"name": "id", "data_type": "bigint"}]}, "fact_ids": ["fact_products_id"]}],
+  "follow_up_questions": []
+}

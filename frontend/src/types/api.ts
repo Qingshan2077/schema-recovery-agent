@@ -242,6 +242,7 @@ export interface EvalReport {
 }
 
 export interface ChatMessage {
+  messageId?: string;
   role: "user" | "assistant" | "system";
   content: string;
   type?: ChatResponse["type"];
@@ -249,6 +250,79 @@ export interface ChatMessage {
   safetyLevel?: "confirm" | "dangerous" | "safe";
   ddlExecuted?: string;
   newAnalysis?: AnalysisResult;
+  structured?: QAOutput | Record<string, unknown>;
+  createdAt?: string;
+}
+
+export interface QACitation {
+  citation_id: string;
+  claim_id: string;
+  fact_ids: string[];
+  label: string;
+  locator: Record<string, unknown>;
+}
+
+export interface QAArtifact {
+  artifact_id: string;
+  type: "column_table" | "relation_cards" | "evidence_cards" | "clarification_options" | "metadata_card" | "index_table" | "overview";
+  title: string;
+  data: Record<string, unknown>;
+  fact_ids: string[];
+}
+
+export interface QAEntityRef {
+  mention: string;
+  status: "resolved" | "ambiguous" | "not_found";
+  canonical_name?: string;
+  resolution_method: string;
+  candidates: Array<{ entity_id: string; name: string; schema_name: string }>;
+}
+
+export interface QAOutput {
+  answer?: string;
+  intent: string;
+  clarification_question?: string;
+  entities: QAEntityRef[];
+  citations: QACitation[];
+  artifacts: QAArtifact[];
+  citation_coverage?: number;
+  degraded_reasons?: string[];
+}
+
+export interface ChatThreadResponse {
+  thread_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: Array<{
+    message_id: string;
+    role: "user" | "assistant" | "system";
+    content: string;
+    structured?: QAOutput | Record<string, unknown>;
+    created_at: string;
+  }>;
+  last_sequence: number;
+}
+
+export interface StartedQARun {
+  thread_id: string;
+  message_id: string;
+  run_id: string;
+  trace_id: string;
+  status: "running";
+  reused: boolean;
+  events_url: string;
+}
+
+export interface ChatEventPage {
+  events: Array<{
+    event_id: string;
+    run_id: string;
+    event_type: string;
+    status: RunStatus;
+    payload: Record<string, unknown>;
+  }>;
+  next_sequence: number;
 }
 
 interface ChatIdentityFields {
@@ -260,10 +334,13 @@ interface ChatIdentityFields {
 
 export type ChatResponse =
   | (ChatIdentityFields & {
-      type: "answer";
+      type: "answer" | "clarification";
       content: string;
       intent?: string;
       data?: unknown;
+      qa_run_id?: string;
+      citations?: QACitation[];
+      artifacts?: QAArtifact[];
     })
   | (ChatIdentityFields & {
       type: "confirmation";

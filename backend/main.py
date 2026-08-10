@@ -15,6 +15,7 @@ from backend.agent.runtime.run_context import RunContext
 from backend.agent.runtime.tracing import RunStoreEventSink
 from backend.agent.workers.dba import DBAWorker
 from backend.agent.workers.qa import QAWorker
+from backend.api.v2 import create_chat_router
 from backend.config import Config
 from backend.core.identity import RunIdentity
 from backend.core.legacy_ids import LegacyIdStore
@@ -29,6 +30,7 @@ from backend.schemas import (
 )
 
 app = FastAPI(title="Schema Recovery Agent", version="1.0.0")
+app.include_router(create_chat_router(lambda: _chat_service()))
 
 
 @app.on_event("startup")
@@ -40,6 +42,26 @@ async def startup() -> None:
     app.state.tool_registry = init_mcp_tools(app.state.runtime.tool_runtime)
     app.state.run_store = RunStore()
     app.state.legacy_id_store = LegacyIdStore()
+    from backend.agent.qa import QAAgent
+    from backend.chat import ChatService, SQLiteChatRepository
+
+    qa_mode = Config.QA_AGENT_V2.strip().lower()
+    if qa_mode not in {"disabled", "shadow", "enabled"}:
+        raise ValueError("QA_AGENT_V2 must be disabled, shadow, or enabled")
+    app.state.chat_repository = SQLiteChatRepository(Config.QA_CHAT_DB_PATH)
+    app.state.qa_agent = QAAgent(
+        model_gateway=app.state.runtime.model_gateway,
+        tool_runtime=app.state.runtime.tool_runtime,
+        max_tool_calls=Config.QA_MAX_TOOL_CALLS,
+        max_tool_rounds=Config.QA_MAX_TOOL_ROUNDS,
+        max_context_messages=Config.QA_MAX_CONTEXT_MESSAGES,
+        max_question_chars=Config.QA_MAX_QUESTION_CHARS,
+    )
+    app.state.chat_service = ChatService(
+        repository=app.state.chat_repository,
+        qa_agent=app.state.qa_agent,
+        runtime=app.state.runtime,
+    )
     app.state.schema_graph = None
     app.state.langgraph_error = None
     if Config.LANGGRAPH_ENABLED:
@@ -65,6 +87,7 @@ async def health() -> dict[str, Any]:
         "agent_runtime": Config.AGENT_RUNTIME_V2,
         "model_provider_mode": Config.MODEL_PROVIDER_MODE,
         "model_profiles": _runtime().profiles.public_inventory(),
+        "qa_agent_v2": Config.QA_AGENT_V2,
     }
 
 
@@ -152,6 +175,27 @@ async def chat(request: ChatRequest) -> dict[str, Any]:
             RunStatus.SUCCESS if result["status"] == "success" else RunStatus.ERROR,
         )
 
+    qa_mode = Config.QA_AGENT_V2.strip().lower()
+    if qa_mode in {"enabled", "shadow"}:
+        service = _chat_service()
+        service.repository.ensure_thread(thread_id, owner_id="local")
+        started = service.start_message(thread_id=thread_id, owner_id="local", content=request.message)
+        qa_run = await service.execute(started, owner_id="local")
+        output = qa_run.result or {}
+    if qa_mode == "enabled":
+        blocked = qa_run.status == "blocked"
+        return _finish_chat(identity, {
+            "type": "answer" if not blocked else "clarification",
+            "session_id": thread_id,
+            **identity.model_dump(),
+            "content": output.get("answer") or output.get("clarification_question") or (qa_run.error or {}).get("message", ""),
+            "intent": output.get("intent"),
+            "data": output,
+            "qa_run_id": qa_run.run_id,
+            "citations": output.get("citations", []),
+            "artifacts": output.get("artifacts", []),
+        }, RunStatus(qa_run.status))
+
     worker = QAWorker(
         app.state.tool_registry,
         run_context=runtime_context.for_agent("qa") if runtime_context else None,
@@ -219,6 +263,13 @@ def _orchestrator(runtime_context: RunContext | None = None) -> Orchestrator:
         tool_runtime=runtime.tool_runtime,
         model_gateway=runtime.model_gateway,
     )
+
+
+def _chat_service():
+    service = getattr(app.state, "chat_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="chat_service_not_ready")
+    return service
 
 
 def _analysis_stream(identity: RunIdentity, runtime_context: RunContext | None) -> Iterable[str]:
@@ -449,6 +500,11 @@ def _finish_chat(identity: RunIdentity, payload: dict[str, Any], status: RunStat
 
 @app.get("/api/v2/runs/{run_id}")
 async def get_run(run_id: str) -> dict[str, Any]:
+    chat_service = getattr(app.state, "chat_service", None)
+    if chat_service is not None:
+        qa_run = chat_service.repository.get_run(run_id, owner_id="local")
+        if qa_run is not None:
+            return qa_run.model_dump(mode="json")
     record = _run_store().get(run_id)
     if record is None:
         from backend.monitor.recorder import MonitorRecorder
