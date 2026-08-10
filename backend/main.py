@@ -10,6 +10,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.agent.orchestrator import Orchestrator
+from backend.agent.runtime import RuntimeContainer, build_runtime_container
+from backend.agent.runtime.run_context import RunContext
+from backend.agent.runtime.tracing import RunStoreEventSink
 from backend.agent.workers.dba import DBAWorker
 from backend.agent.workers.qa import QAWorker
 from backend.config import Config
@@ -33,7 +36,8 @@ async def startup() -> None:
     from backend.agent.memory.global_memory import GlobalMemory
     from backend.mcp.server import init_mcp_tools
 
-    app.state.tool_registry = init_mcp_tools()
+    app.state.runtime = build_runtime_container(Config)
+    app.state.tool_registry = init_mcp_tools(app.state.runtime.tool_runtime)
     app.state.run_store = RunStore()
     app.state.legacy_id_store = LegacyIdStore()
     app.state.schema_graph = None
@@ -42,7 +46,10 @@ async def startup() -> None:
         try:
             from backend.langgraph import build_schema_recovery_graph
 
-            app.state.schema_graph = build_schema_recovery_graph(app.state.tool_registry)
+            app.state.schema_graph = build_schema_recovery_graph(
+                app.state.tool_registry,
+                event_sink=RunStoreEventSink(app.state.run_store),
+            )
         except Exception as exc:
             app.state.langgraph_error = _public_error(exc)
     GlobalMemory()
@@ -55,6 +62,9 @@ async def health() -> dict[str, Any]:
         "langgraph_enabled": Config.LANGGRAPH_ENABLED,
         "langgraph_ready": bool(getattr(app.state, "schema_graph", None)),
         "langgraph_error": getattr(app.state, "langgraph_error", None),
+        "agent_runtime": Config.AGENT_RUNTIME_V2,
+        "model_provider_mode": Config.MODEL_PROVIDER_MODE,
+        "model_profiles": _runtime().profiles.public_inventory(),
     }
 
 
@@ -63,7 +73,8 @@ async def run_analysis() -> dict[str, Any]:
     identity = RunIdentity.create()
     store = _run_store()
     store.start(identity, engine="langgraph" if Config.LANGGRAPH_ENABLED else "manual")
-    result = _orchestrator().run_full_analysis(identity=identity)
+    runtime_context = _new_runtime_context(identity, agent_id="orchestrator")
+    result = _orchestrator(runtime_context).run_full_analysis(identity=identity)
     store.complete(identity.run_id, sanitize_analysis_result(result))
     return analysis_result_v1(result)
 
@@ -72,8 +83,9 @@ async def run_analysis() -> dict[str, Any]:
 async def analyze_stream() -> StreamingResponse:
     identity = RunIdentity.create()
     _run_store().start(identity, engine="langgraph" if Config.LANGGRAPH_ENABLED else "manual")
+    runtime_context = _new_runtime_context(identity, agent_id="orchestrator")
     return StreamingResponse(
-        _analysis_stream(identity),
+        _analysis_stream(identity, runtime_context),
         media_type="application/x-ndjson",
         headers={"X-Run-ID": identity.run_id, "X-Trace-ID": identity.trace_id},
     )
@@ -86,6 +98,8 @@ async def chat(request: ChatRequest) -> dict[str, Any]:
         entity_type="thread",
     )
     identity = RunIdentity.create(thread_id=thread_id)
+    _run_store().start(identity, engine="chat")
+    runtime_context = _new_runtime_context(identity, agent_id="chat")
     intent = classify_chat_intent(request.message, request.pending_operation)
     shared_context = {
         "question": request.message,
@@ -97,7 +111,12 @@ async def chat(request: ChatRequest) -> dict[str, Any]:
     }
 
     if intent == "ddl":
-        worker = DBAWorker(app.state.tool_registry)
+        worker = DBAWorker(
+            app.state.tool_registry,
+            run_context=runtime_context.for_agent("dba") if runtime_context else None,
+            tool_runtime=_runtime().tool_runtime,
+            model_gateway=_runtime().model_gateway,
+        )
         result = worker.run(
             {
                 **shared_context,
@@ -106,15 +125,15 @@ async def chat(request: ChatRequest) -> dict[str, Any]:
             }
         )
         if result["status"] == "need_confirmation":
-            return {
+            return _finish_chat(identity, {
                 "type": "confirmation",
                 "session_id": thread_id,
                 **identity.model_dump(),
                 "message": result["message"],
                 "pending": result.get("pending_operation"),
                 "safety_level": result.get("safety_level"),
-            }
-        return {
+            }, RunStatus.BLOCKED)
+        payload = {
             "type": "result" if result["status"] == "success" else "error",
             "session_id": thread_id,
             **identity.model_dump(),
@@ -127,17 +146,27 @@ async def chat(request: ChatRequest) -> dict[str, Any]:
             ),
             "data": result.get("data"),
         }
+        return _finish_chat(
+            identity,
+            payload,
+            RunStatus.SUCCESS if result["status"] == "success" else RunStatus.ERROR,
+        )
 
-    worker = QAWorker(app.state.tool_registry)
+    worker = QAWorker(
+        app.state.tool_registry,
+        run_context=runtime_context.for_agent("qa") if runtime_context else None,
+        tool_runtime=_runtime().tool_runtime,
+        model_gateway=_runtime().model_gateway,
+    )
     result = worker.run(shared_context)
-    return {
+    return _finish_chat(identity, {
         "type": "answer",
         "session_id": thread_id,
         **identity.model_dump(),
         "content": result["answer"],
         "intent": result.get("intent"),
         "data": result.get("data"),
-    }
+    }, RunStatus.SUCCESS if result.get("status") == "success" else RunStatus.ERROR)
 
 
 def classify_chat_intent(question: str, pending_operation: dict[str, Any] | None = None) -> str:
@@ -180,13 +209,20 @@ def _chat_history_without_current(request: ChatRequest) -> list[dict[str, Any]]:
     return history
 
 
-def _orchestrator() -> Orchestrator:
+def _orchestrator(runtime_context: RunContext | None = None) -> Orchestrator:
     graph = getattr(app.state, "schema_graph", None) if Config.LANGGRAPH_ENABLED else None
-    return Orchestrator(app.state.tool_registry, graph=graph)
+    runtime = _runtime()
+    return Orchestrator(
+        app.state.tool_registry,
+        graph=graph,
+        run_context=runtime_context,
+        tool_runtime=runtime.tool_runtime,
+        model_gateway=runtime.model_gateway,
+    )
 
 
-def _analysis_stream(identity: RunIdentity) -> Iterable[str]:
-    orchestrator = _orchestrator()
+def _analysis_stream(identity: RunIdentity, runtime_context: RunContext | None) -> Iterable[str]:
+    orchestrator = _orchestrator(runtime_context)
     store = _run_store()
     sequencer = EventSequencer(identity)
 
@@ -378,6 +414,37 @@ def _legacy_id_store() -> LegacyIdStore:
         store = LegacyIdStore()
         app.state.legacy_id_store = store
     return store
+
+
+def _runtime() -> RuntimeContainer:
+    runtime = getattr(app.state, "runtime", None)
+    if runtime is None:
+        runtime = build_runtime_container(Config)
+        app.state.runtime = runtime
+    return runtime
+
+
+def _new_runtime_context(identity: RunIdentity, *, agent_id: str) -> RunContext | None:
+    if str(Config.AGENT_RUNTIME_V2).strip().lower() != "enabled":
+        return None
+    return _runtime().new_context(
+        identity,
+        agent_id=agent_id,
+        event_sink=RunStoreEventSink(_run_store()),
+    )
+
+
+def _finish_chat(identity: RunIdentity, payload: dict[str, Any], status: RunStatus) -> dict[str, Any]:
+    _run_store().complete(
+        identity.run_id,
+        {
+            **payload,
+            "status": status.value,
+            "run_status": status.value,
+            **identity.model_dump(),
+        },
+    )
+    return payload
 
 
 @app.get("/api/v2/runs/{run_id}")

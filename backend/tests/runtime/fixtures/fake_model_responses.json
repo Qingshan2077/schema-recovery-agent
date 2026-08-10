@@ -1,0 +1,17 @@
+[
+  {
+    "kind": "success",
+    "output": {
+      "accuracy": 80,
+      "evidence_quality": 75,
+      "confidence_calibration": 70,
+      "completeness": 65,
+      "overall_comment": "Evidence is usable but incomplete.",
+      "improvement_suggestions": ["Add reference-aware coverage evidence."]
+    },
+    "usage": {"input_tokens": 40, "output_tokens": 20, "total_tokens": 60, "cost_usd": "0"}
+  },
+  {"kind": "bad_json", "content": "not-json"},
+  {"kind": "rate_limit"},
+  {"kind": "timeout"}
+]

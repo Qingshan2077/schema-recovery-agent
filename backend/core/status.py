@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from enum import Enum
-from typing import Any
+import re
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class RunStatus(str, Enum):
@@ -46,13 +47,45 @@ _PRIORITY = {
 
 
 class AgentError(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
     code: str
+    category: Literal[
+        "validation",
+        "provider",
+        "timeout",
+        "rate_limit",
+        "tool",
+        "permission",
+        "budget",
+        "cancelled",
+        "internal",
+    ] = "internal"
     message: str
     retryable: bool = False
+    source: str = "runtime"
     details: dict[str, Any] = Field(default_factory=dict)
+    cause_span_id: str | None = None
+
+    @field_validator("message", mode="after")
+    @classmethod
+    def redact_message(cls, value: str) -> str:
+        return re.sub(
+            r"(?i)(password|passwd|token|secret|api[_-]?key|authorization)\s*[:=]\s*[^,}\s]+",
+            r"\1=***",
+            value,
+        )[:1000]
+
+    @field_validator("details", mode="after")
+    @classmethod
+    def redact_details(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _redact_error_value(value)
 
 
 class AgentRunResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    contract_version: Literal["2.0"] = "2.0"
     status: RunStatus
     output: dict[str, Any] = Field(default_factory=dict)
     evidence_ids: list[str] = Field(default_factory=list)
@@ -64,6 +97,21 @@ class AgentRunResult(BaseModel):
     error: AgentError | None = None
     model_profile: str | None = None
     prompt_version: str | None = None
+
+    @field_validator("evidence_ids", "tool_call_ids", mode="after")
+    @classmethod
+    def deduplicate_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def validate_status_contract(self) -> "AgentRunResult":
+        if self.status == RunStatus.SUCCESS and self.error is not None:
+            raise ValueError("success result cannot contain an error")
+        if self.status in {RunStatus.ERROR, RunStatus.BLOCKED, RunStatus.CANCELLED} and self.error is None:
+            raise ValueError(f"{self.status.value} result requires an error")
+        if self.status == RunStatus.DEGRADED and not (self.uncertainties or self.next_actions or self.error):
+            raise ValueError("degraded result must describe a capability gap")
+        return self
 
 
 def coerce_run_status(value: RunStatus | str) -> RunStatus:
@@ -140,8 +188,8 @@ def validate_terminal_result(
     canonical = coerce_run_status(status)
     if canonical not in TERMINAL_STATUSES:
         raise ValueError("running is not a valid terminal result")
-    if canonical == RunStatus.ERROR and not error:
-        raise ValueError("error status requires a structured error")
+    if canonical in {RunStatus.ERROR, RunStatus.BLOCKED, RunStatus.CANCELLED} and not error:
+        raise ValueError(f"{canonical.value} status requires a structured error")
     if canonical == RunStatus.SUCCESS and require_output and not output:
         raise ValueError("success status requires a core output artifact")
 
@@ -167,23 +215,46 @@ def normalize_legacy_result(result: Mapping[str, Any]) -> AgentRunResult:
     error: AgentError | None = None
     if raw_error:
         if isinstance(raw_error, Mapping):
+            category = str(raw_error.get("category", "internal"))
+            if category not in {
+                "validation", "provider", "timeout", "rate_limit", "tool",
+                "permission", "budget", "cancelled", "internal",
+            }:
+                category = "internal"
             error = AgentError(
                 code=str(raw_error.get("code", "legacy_error")),
+                category=category,
                 message=str(raw_error.get("message", raw_error)),
                 retryable=bool(raw_error.get("retryable", False)),
+                source=str(raw_error.get("source", "legacy_adapter")),
                 details=dict(raw_error.get("details") or {}),
             )
         else:
-            error = AgentError(code="legacy_error", message=str(raw_error))
-    if status == RunStatus.ERROR and error is None:
-        error = AgentError(code="legacy_error", message="Legacy worker returned error without details")
+            error = AgentError(code="legacy_error", message=str(raw_error), source="legacy_adapter")
+    if status in {RunStatus.ERROR, RunStatus.BLOCKED, RunStatus.CANCELLED} and error is None:
+        error = AgentError(
+            code="legacy_error",
+            category="cancelled" if status == RunStatus.CANCELLED else "internal",
+            message=f"Legacy worker returned {status.value} without details",
+            source="legacy_adapter",
+        )
+
+    uncertainties = list(result.get("uncertainties") or [])
+    if status == RunStatus.DEGRADED and not uncertainties:
+        uncertainties.append("legacy_worker_reported_degraded_without_structured_capability_details")
 
     return AgentRunResult(
         status=status,
         output=raw_output,
         evidence_ids=list(result.get("evidence_ids") or []),
         tool_call_ids=list(result.get("tool_call_ids") or []),
+        assumptions=list(result.get("assumptions") or []),
+        uncertainties=uncertainties,
+        decision_summary=str(result.get("decision_summary") or ""),
+        next_actions=list(result.get("next_actions") or []),
         error=error,
+        model_profile=result.get("model_profile"),
+        prompt_version=result.get("prompt_version"),
     )
 
 
@@ -193,3 +264,21 @@ def _step_values(steps: Mapping[str, str] | Iterable[str]) -> list[str]:
         value.value if isinstance(value, RunStatus) else str(value).strip().lower()
         for value in values
     ]
+
+
+def _redact_error_value(value: Any) -> Any:
+    sensitive = {"password", "passwd", "token", "secret", "api_key", "authorization", "connection_string"}
+    if isinstance(value, dict):
+        return {
+            str(key): "***" if str(key).lower() in sensitive else _redact_error_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_error_value(item) for item in value]
+    if isinstance(value, str):
+        return re.sub(
+            r"(?i)(password|passwd|token|secret|api[_-]?key|authorization)\s*[:=]\s*[^,}\s]+",
+            r"\1=***",
+            value,
+        )[:1000]
+    return value

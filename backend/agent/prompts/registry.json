@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "prompts": [
+    {
+      "prompt_id": "judge.analysis",
+      "semantic_version": "1.0.0",
+      "agent_id": "llm_judge",
+      "purpose": "Evaluate a schema recovery summary using a strict evidence-bounded rubric.",
+      "template_path": "judge/analysis-v1.md",
+      "sha256": "78823fcaa0657f933410598f021ea232419a257c08b57208ab5e41604d0d239f",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "analysis_summary": {"type": "string", "minLength": 1, "maxLength": 30000}
+        },
+        "required": ["analysis_summary"],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "accuracy": {"type": "integer", "minimum": 0, "maximum": 100},
+          "evidence_quality": {"type": "integer", "minimum": 0, "maximum": 100},
+          "confidence_calibration": {"type": "integer", "minimum": 0, "maximum": 100},
+          "completeness": {"type": "integer", "minimum": 0, "maximum": 100},
+          "overall_comment": {"type": "string", "maxLength": 2000},
+          "improvement_suggestions": {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 500},
+            "maxItems": 10
+          }
+        },
+        "required": [
+          "accuracy",
+          "evidence_quality",
+          "confidence_calibration",
+          "completeness",
+          "overall_comment",
+          "improvement_suggestions"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": ["strict_schema"],
+      "allowed_tools": [],
+      "created_at": "2026-08-10T00:00:00Z",
+      "status": "active"
+    }
+  ]
+}

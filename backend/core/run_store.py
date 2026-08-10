@@ -28,6 +28,8 @@ class RunStore:
             "created_at": now,
             "updated_at": now,
             "last_sequence": 0,
+            "runtime_last_sequence": 0,
+            "runtime_events": [],
             "result": None,
         }
         with self._lock:
@@ -55,6 +57,30 @@ class RunStore:
             record["last_sequence"] = max(int(record.get("last_sequence", 0)), sequence)
             record["updated_at"] = datetime.now(timezone.utc).isoformat()
 
+    def record_runtime_event(self, event: dict[str, Any]) -> None:
+        run_id = str(event["run_id"])
+        with self._lock:
+            record = self._records.setdefault(
+                run_id,
+                {
+                    "run_id": run_id,
+                    "session_id": run_id,
+                    "trace_id": event.get("trace_id"),
+                    "status": RunStatus.RUNNING.value,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_sequence": 0,
+                    "runtime_last_sequence": 0,
+                    "runtime_events": [],
+                },
+            )
+            runtime_events = record.setdefault("runtime_events", [])
+            next_sequence = int(record.get("runtime_last_sequence", 0)) + 1
+            persisted_event = deepcopy(event)
+            persisted_event["sequence"] = next_sequence
+            runtime_events.append(persisted_event)
+            record["runtime_last_sequence"] = next_sequence
+            record["updated_at"] = datetime.now(timezone.utc).isoformat()
+
     def complete(self, run_id: str, result: dict[str, Any]) -> dict[str, Any]:
         status = coerce_run_status(result.get("run_status") or result.get("status") or RunStatus.ERROR.value)
         with self._lock:
@@ -65,6 +91,8 @@ class RunStore:
                     "session_id": run_id,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "last_sequence": 0,
+                    "runtime_last_sequence": 0,
+                    "runtime_events": [],
                 },
             )
             record["status"] = status.value

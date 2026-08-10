@@ -10,16 +10,16 @@ from backend.langgraph.state import AgentState
 from backend.mcp.tool_registry import ToolRegistry
 
 
-def build_schema_recovery_graph(tool_registry: ToolRegistry):
+def build_schema_recovery_graph(tool_registry: ToolRegistry, *, event_sink=None):
     builder = StateGraph(AgentState)
 
-    builder.add_node("survey_node", lambda state: survey_node(state, tool_registry))
-    builder.add_node("column_node", lambda state: column_node(state, tool_registry))
-    builder.add_node("name_node", lambda state: name_node(state, tool_registry))
-    builder.add_node("code_node", lambda state: code_node(state, tool_registry))
-    builder.add_node("orm_node", lambda state: orm_node(state, tool_registry))
+    builder.add_node("survey_node", lambda state: survey_node(state, tool_registry, event_sink))
+    builder.add_node("column_node", lambda state: column_node(state, tool_registry, event_sink))
+    builder.add_node("name_node", lambda state: name_node(state, tool_registry, event_sink))
+    builder.add_node("code_node", lambda state: code_node(state, tool_registry, event_sink))
+    builder.add_node("orm_node", lambda state: orm_node(state, tool_registry, event_sink))
     builder.add_node("skip_orm_node", skipped_orm_node)
-    builder.add_node("merge_node", lambda state: merge_node(state, tool_registry))
+    builder.add_node("merge_node", lambda state: merge_node(state, tool_registry, event_sink))
 
     builder.set_entry_point("survey_node")
     builder.add_conditional_edges("survey_node", route_after_survey)
@@ -34,5 +34,4 @@ def build_schema_recovery_graph(tool_registry: ToolRegistry):
     builder.add_edge("merge_node", END)
 
     return builder.compile()
-
 

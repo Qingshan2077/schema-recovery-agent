@@ -7,6 +7,10 @@ import time
 from typing import Any
 
 from backend.agent.router import Router
+from backend.agent.runtime import build_default_budget
+from backend.agent.runtime.model_gateway import ModelGateway
+from backend.agent.runtime.run_context import RunContext
+from backend.agent.runtime.tool_runtime import ToolRuntime
 from backend.agent.workers.code import CodeWorker
 from backend.agent.workers.column import ColumnWorker
 from backend.agent.workers.merge import MergeWorker
@@ -41,6 +45,9 @@ class Orchestrator:
         memory_db_path: str | None = None,
         global_memory_db_path: str | None = None,
         snapshot_db_path: str | None = None,
+        run_context: RunContext | None = None,
+        tool_runtime: ToolRuntime | None = None,
+        model_gateway: ModelGateway | None = None,
     ):
         self.tool_registry = tool_registry
         self.graph = graph
@@ -49,14 +56,24 @@ class Orchestrator:
         self.memory_db_path = memory_db_path
         self.global_memory_db_path = global_memory_db_path
         self.snapshot_db_path = snapshot_db_path
+        self.run_context = run_context
+        self.tool_runtime = tool_runtime or tool_registry.runtime
+        self.model_gateway = model_gateway
         self.workers = {
-            "survey": SurveyWorker(tool_registry),
-            "column": ColumnWorker(tool_registry),
-            "name": NameWorker(tool_registry),
-            "code": CodeWorker(tool_registry),
-            "orm": ORMWorker(tool_registry),
-            "merge": MergeWorker(tool_registry),
+            "survey": SurveyWorker(tool_registry, run_context=run_context, tool_runtime=self.tool_runtime, model_gateway=model_gateway),
+            "column": ColumnWorker(tool_registry, run_context=run_context, tool_runtime=self.tool_runtime, model_gateway=model_gateway),
+            "name": NameWorker(tool_registry, run_context=run_context, tool_runtime=self.tool_runtime, model_gateway=model_gateway),
+            "code": CodeWorker(tool_registry, run_context=run_context, tool_runtime=self.tool_runtime, model_gateway=model_gateway),
+            "orm": ORMWorker(tool_registry, run_context=run_context, tool_runtime=self.tool_runtime, model_gateway=model_gateway),
+            "merge": MergeWorker(tool_registry, run_context=run_context, tool_runtime=self.tool_runtime, model_gateway=model_gateway),
         }
+        if run_context is not None:
+            for worker in self.workers.values():
+                worker.configure_runtime(
+                    run_context=run_context,
+                    tool_runtime=self.tool_runtime,
+                    model_gateway=model_gateway,
+                )
 
     def run_full_analysis(self, identity: RunIdentity | None = None) -> dict[str, Any]:
         identity = identity or RunIdentity.create()
@@ -210,6 +227,24 @@ class Orchestrator:
     ) -> dict[str, Any]:
         start = time.time()
         worker = self.workers[worker_id]
+        if self.run_context is None:
+            identity = RunIdentity(
+                run_id=context["run_id"],
+                trace_id=context["trace_id"],
+                thread_id=context.get("thread_id"),
+                parent_run_id=context.get("parent_run_id"),
+                attempt=int(context.get("attempt", 1)),
+            )
+            self.run_context = RunContext.from_identity(
+                identity,
+                agent_id="orchestrator",
+                budget=build_default_budget(Config),
+            )
+        worker.configure_runtime(
+            run_context=self.run_context,
+            tool_runtime=self.tool_runtime,
+            model_gateway=self.model_gateway,
+        )
         worker.reset_call_log()
         try:
             output = worker.run(context)
@@ -409,8 +444,11 @@ class Orchestrator:
             result["error"] = error
             result["error_detail"] = {
                 "code": "analysis_failed",
+                "category": "internal",
                 "message": error,
                 "retryable": canonical not in {RunStatus.CANCELLED, RunStatus.BLOCKED},
+                "source": "orchestrator",
+                "details": {},
             }
         validate_terminal_result(
             canonical,

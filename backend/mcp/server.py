@@ -1,10 +1,11 @@
 """MCP tool registration entry point."""
 
 from backend.mcp.tool_registry import ToolRegistry
+from backend.agent.runtime.tool_runtime import ToolRuntime
 
 
-def init_mcp_tools() -> ToolRegistry:
-    registry = ToolRegistry()
+def init_mcp_tools(tool_runtime: ToolRuntime | None = None) -> ToolRegistry:
+    registry = ToolRegistry(runtime=tool_runtime)
 
     from backend.mcp.tools import code_tools, column_tools, dba_tools, name_tools, orm_tools, qa_tools, survey_tools
 

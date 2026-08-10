@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from backend.core.identity import RunIdentity, new_id
 from backend.core.status import RunStatus, coerce_run_status, map_v2_status_to_v1
+from backend.agent.runtime.contracts import AgentError, RuntimeEvent, StrictContract
 
 
 class AnalysisStepModel(BaseModel):
@@ -52,6 +53,15 @@ class StreamEventModel(BaseModel):
 class ChatMessageModel(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
+
+
+class RuntimeErrorResponse(StrictContract):
+    error: AgentError
+    run_id: str | None = None
+    trace_id: str | None = None
+
+
+RuntimeEventModel = RuntimeEvent
 
 
 class ChatRequest(BaseModel):
