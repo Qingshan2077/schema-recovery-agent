@@ -25,6 +25,10 @@ IdKind = Literal[
     "citation",
     "fact",
     "catalog",
+    "work_unit",
+    "proposal",
+    "request",
+    "revision",
 ]
 
 _PREFIXES: dict[IdKind, str] = {
@@ -43,6 +47,10 @@ _PREFIXES: dict[IdKind, str] = {
     "citation": "cit",
     "fact": "fact",
     "catalog": "cat",
+    "work_unit": "wunit",
+    "proposal": "prop",
+    "request": "req",
+    "revision": "rev",
 }
 
 

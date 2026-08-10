@@ -7,7 +7,10 @@ from backend.agent.runtime.tool_runtime import ToolRuntime
 def init_mcp_tools(tool_runtime: ToolRuntime | None = None) -> ToolRegistry:
     registry = ToolRegistry(runtime=tool_runtime)
 
-    from backend.mcp.tools import catalog_tools, code_tools, column_tools, dba_tools, name_tools, orm_tools, qa_tools, survey_tools
+    from backend.mcp.tools import (
+        catalog_tools, code_ast_tools, code_tools, column_profile_tools, column_tools,
+        dba_tools, name_tools, orm_asset_tools, orm_tools, qa_tools, survey_tools,
+    )
 
     survey_tools.register_all(registry)
     column_tools.register_all(registry)
@@ -16,5 +19,8 @@ def init_mcp_tools(tool_runtime: ToolRuntime | None = None) -> ToolRegistry:
     orm_tools.register_all(registry)
     qa_tools.register_all(registry)
     catalog_tools.register_all(registry)
+    column_profile_tools.register_all(registry)
+    code_ast_tools.register_all(registry)
+    orm_asset_tools.register_all(registry)
     dba_tools.register_all(registry)
     return registry

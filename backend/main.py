@@ -71,6 +71,7 @@ async def startup() -> None:
             app.state.schema_graph = build_schema_recovery_graph(
                 app.state.tool_registry,
                 event_sink=RunStoreEventSink(app.state.run_store),
+                model_gateway=app.state.runtime.model_gateway,
             )
         except Exception as exc:
             app.state.langgraph_error = _public_error(exc)

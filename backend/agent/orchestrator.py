@@ -17,6 +17,7 @@ from backend.agent.workers.merge import MergeWorker
 from backend.agent.workers.name import NameWorker
 from backend.agent.workers.orm import ORMWorker
 from backend.agent.workers.survey import SurveyWorker
+from backend.agent.workers.hybrid_stage import HybridWorkerRunner, configured_worker_mode
 from backend.config import Config
 from backend.core.identity import RunIdentity
 from backend.core.lineage import attach_merge_lineage
@@ -59,6 +60,7 @@ class Orchestrator:
         self.run_context = run_context
         self.tool_runtime = tool_runtime or tool_registry.runtime
         self.model_gateway = model_gateway
+        self.hybrid_runner: HybridWorkerRunner | None = None
         self.workers = {
             "survey": SurveyWorker(tool_registry, run_context=run_context, tool_runtime=self.tool_runtime, model_gateway=model_gateway),
             "column": ColumnWorker(tool_registry, run_context=run_context, tool_runtime=self.tool_runtime, model_gateway=model_gateway),
@@ -105,7 +107,10 @@ class Orchestrator:
             identity=identity,
             snapshot_db_path=self.snapshot_db_path,
         )
-        graph = self.graph or build_schema_recovery_graph(self.tool_registry)
+        graph = self.graph or build_schema_recovery_graph(
+            self.tool_registry,
+            model_gateway=self.model_gateway,
+        )
         final_state = graph.invoke(initial_state)
         if final_state.get("merge_result"):
             attach_merge_lineage(
@@ -247,7 +252,17 @@ class Orchestrator:
         )
         worker.reset_call_log()
         try:
-            output = worker.run(context)
+            mode = configured_worker_mode(worker_id)
+            if mode == "legacy":
+                output = worker.run(context)
+            else:
+                if self.hybrid_runner is None:
+                    self.hybrid_runner = HybridWorkerRunner(
+                        run_context=self.run_context,
+                        tool_runtime=self.tool_runtime,
+                        model_gateway=self.model_gateway,
+                    )
+                output = self.hybrid_runner.run(worker_id, worker, context, mode)
             if not isinstance(output, dict):
                 raise TypeError(f"{worker_id} worker returned a non-object result")
             status = coerce_worker_status(output.get("status"))
@@ -307,7 +322,7 @@ class Orchestrator:
     ) -> RunStatus:
         final_status = coerce_run_status(status)
         merge_result = context.get("merge_result")
-        if merge_result and final_status in {
+        if Config.EVIDENCE_LEDGER_DUAL_WRITE and merge_result and final_status in {
             RunStatus.SUCCESS,
             RunStatus.PARTIAL,
             RunStatus.DEGRADED,

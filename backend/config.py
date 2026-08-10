@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from decimal import Decimal
+from typing import Literal
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -76,6 +77,21 @@ class Settings(BaseSettings):
     QA_MAX_CONTEXT_MESSAGES: int = 12
     QA_MAX_QUESTION_CHARS: int = 4000
     QA_CHAT_DB_PATH: str = "data/chat/chat.db"
+
+    WORKER_IMPL_SURVEY: Literal["legacy", "hybrid", "shadow"] = "legacy"
+    WORKER_IMPL_COLUMN: Literal["legacy", "hybrid", "shadow"] = "legacy"
+    WORKER_IMPL_NAME: Literal["legacy", "hybrid", "shadow"] = "legacy"
+    WORKER_IMPL_CODE: Literal["legacy", "hybrid", "shadow"] = "legacy"
+    WORKER_IMPL_ORM: Literal["legacy", "hybrid", "shadow"] = "legacy"
+    WORKER_IMPL_MERGE: Literal["legacy", "hybrid", "shadow"] = "legacy"
+    EVIDENCE_LEDGER_DUAL_WRITE: bool = True
+    EVIDENCE_DB_PATH: str = "data/evidence/evidence.db"
+    CRITIC_ENABLED: bool = False
+    RUN_MAX_EVIDENCE_ROUNDS: int = 2
+    WORK_UNIT_TIMEOUT_SECONDS: int = 120
+    WORK_UNIT_MAX_MODEL_CALLS: int = 2
+    FUSION_MODEL_VERSION: str = "log_odds_v2"
+    FUSION_WEIGHT_VERSION: str = "phase3-default-v1"
     TENANT_ID: str = "default"
     PROJECT_ID: str = "default"
     EVAL_REPORT_DIR: str = "data/eval/reports"
@@ -160,6 +176,21 @@ class Config:
     QA_MAX_CONTEXT_MESSAGES = settings.QA_MAX_CONTEXT_MESSAGES
     QA_MAX_QUESTION_CHARS = settings.QA_MAX_QUESTION_CHARS
     QA_CHAT_DB_PATH = settings.QA_CHAT_DB_PATH
+
+    WORKER_IMPL_SURVEY = settings.WORKER_IMPL_SURVEY
+    WORKER_IMPL_COLUMN = settings.WORKER_IMPL_COLUMN
+    WORKER_IMPL_NAME = settings.WORKER_IMPL_NAME
+    WORKER_IMPL_CODE = settings.WORKER_IMPL_CODE
+    WORKER_IMPL_ORM = settings.WORKER_IMPL_ORM
+    WORKER_IMPL_MERGE = settings.WORKER_IMPL_MERGE
+    EVIDENCE_LEDGER_DUAL_WRITE = settings.EVIDENCE_LEDGER_DUAL_WRITE
+    EVIDENCE_DB_PATH = settings.EVIDENCE_DB_PATH
+    CRITIC_ENABLED = settings.CRITIC_ENABLED
+    RUN_MAX_EVIDENCE_ROUNDS = settings.RUN_MAX_EVIDENCE_ROUNDS
+    WORK_UNIT_TIMEOUT_SECONDS = settings.WORK_UNIT_TIMEOUT_SECONDS
+    WORK_UNIT_MAX_MODEL_CALLS = settings.WORK_UNIT_MAX_MODEL_CALLS
+    FUSION_MODEL_VERSION = settings.FUSION_MODEL_VERSION
+    FUSION_WEIGHT_VERSION = settings.FUSION_WEIGHT_VERSION
     TENANT_ID = settings.TENANT_ID
     PROJECT_ID = settings.PROJECT_ID
     EVAL_REPORT_DIR = settings.EVAL_REPORT_DIR

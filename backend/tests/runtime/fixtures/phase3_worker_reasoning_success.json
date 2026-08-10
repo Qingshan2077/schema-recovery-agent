@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "success",
+    "output": {
+      "candidates": [
+        {
+          "source_table": "orders",
+          "source_columns": ["customer_id"],
+          "target_table": "customers",
+          "target_columns": ["id"],
+          "cardinality": "N:1",
+          "alternatives": [],
+          "validation_flags": []
+        }
+      ],
+      "assumptions": [],
+      "uncertainties": [],
+      "evidence_requests": [],
+      "decision_summary": "The candidate is copied from the supplied collector fact."
+    }
+  }
+]

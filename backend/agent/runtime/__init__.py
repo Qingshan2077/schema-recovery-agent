@@ -24,6 +24,19 @@ from backend.agent.runtime.providers import FakeProvider, OpenAICompatibleProvid
 from backend.agent.runtime.run_context import CancellationToken, RunContext
 from backend.agent.runtime.tool_runtime import LocalArtifactStore, ToolRuntime
 from backend.core.identity import RunIdentity
+from backend.agent.runtime.hybrid_contracts import (
+    BudgetSlice,
+    CollectorArtifact,
+    CritiqueDecision,
+    EvidenceItem,
+    EvidenceRequest,
+    HybridWorkerResult,
+    ReasoningProposal,
+    RelationCandidate,
+    StageResult,
+    VerificationDecision,
+    WorkUnit,
+)
 
 
 @dataclass(frozen=True)
@@ -144,6 +157,12 @@ def _default_tool_allowlists() -> dict[str, set[str]]:
         "name": {"tool:analyze_naming_convention", "tool:find_column_name_matches", "tool:detect_associative_tables"},
         "code": {"tool:parse_view_definition", "tool:parse_stored_procedure_sql", "tool:analyze_trigger_body"},
         "orm": {"tool:parse_mybatis_xml", "tool:parse_jpa_annotations"},
+        "recovery.column": {"column_profile:read", "catalog:read"},
+        "recovery.code": {"sql_ast:read"},
+        "recovery.orm": {"orm_asset:read"},
+        "recovery.survey": {"catalog:read", "analysis:read"},
+        "recovery.name": {"catalog:read"},
+        "recovery.merge": {"evidence:read"},
     }
 
 
@@ -162,4 +181,15 @@ __all__ = [
     "ToolSpec",
     "build_default_budget",
     "build_runtime_container",
+    "BudgetSlice",
+    "CollectorArtifact",
+    "CritiqueDecision",
+    "EvidenceItem",
+    "EvidenceRequest",
+    "HybridWorkerResult",
+    "ReasoningProposal",
+    "RelationCandidate",
+    "StageResult",
+    "VerificationDecision",
+    "WorkUnit",
 ]

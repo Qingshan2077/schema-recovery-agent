@@ -128,7 +128,18 @@ class PromptRegistry:
             raise PromptRegistryError(f"Prompt registry cannot be loaded: {self.registry_path}") from exc
         if raw.get("schema_version") != "1.0" or not isinstance(raw.get("prompts"), list):
             raise PromptRegistryError("Unsupported or invalid prompt registry schema")
-        entries = [PromptSnapshot.model_validate(item) for item in raw["prompts"]]
+        shared_schemas = raw.get("output_schemas") or {}
+        entries = []
+        for raw_entry in raw["prompts"]:
+            item = dict(raw_entry)
+            schema_ref = item.pop("output_schema_ref", None)
+            if schema_ref is not None:
+                if item.get("output_schema") is not None:
+                    raise PromptRegistryError("Prompt cannot declare output_schema and output_schema_ref together")
+                if schema_ref not in shared_schemas:
+                    raise PromptRegistryError(f"Unknown shared output schema: {schema_ref}")
+                item["output_schema"] = shared_schemas[schema_ref]
+            entries.append(PromptSnapshot.model_validate(item))
         keys = [(entry.prompt_id, entry.semantic_version) for entry in entries]
         if len(keys) != len(set(keys)):
             raise PromptRegistryError("Prompt id and version pairs must be unique")

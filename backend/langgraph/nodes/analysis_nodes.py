@@ -16,6 +16,7 @@ from backend.agent.workers.merge import MergeWorker
 from backend.agent.workers.name import NameWorker
 from backend.agent.workers.orm import ORMWorker
 from backend.agent.workers.survey import SurveyWorker
+from backend.agent.workers.hybrid_stage import HybridWorkerRunner, configured_worker_mode
 from backend.core.status import coerce_worker_status
 from backend.core.identity import RunIdentity
 from backend.config import Config
@@ -27,8 +28,8 @@ WorkerFactory = Callable[[ToolRegistry], Any]
 STEP_ORDER = {"survey": 1, "router": 2, "column": 3, "name": 4, "code": 5, "orm": 6, "merge": 7}
 
 
-def survey_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None) -> dict[str, Any]:
-    update = _run_worker(state, "survey", SurveyWorker, tool_registry, "survey_result", event_sink)
+def survey_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None, model_gateway: Any = None) -> dict[str, Any]:
+    update = _run_worker(state, "survey", SurveyWorker, tool_registry, "survey_result", event_sink, model_gateway)
     survey_result = update.get("survey_result")
     if update.get("errors") or not survey_result:
         return update
@@ -51,23 +52,23 @@ def survey_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any 
     }
 
 
-def column_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None) -> dict[str, Any]:
-    return _run_worker(state, "column", ColumnWorker, tool_registry, "column_result", event_sink)
+def column_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None, model_gateway: Any = None) -> dict[str, Any]:
+    return _run_worker(state, "column", ColumnWorker, tool_registry, "column_result", event_sink, model_gateway)
 
 
-def name_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None) -> dict[str, Any]:
-    return _run_worker(state, "name", NameWorker, tool_registry, "name_result", event_sink)
+def name_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None, model_gateway: Any = None) -> dict[str, Any]:
+    return _run_worker(state, "name", NameWorker, tool_registry, "name_result", event_sink, model_gateway)
 
 
-def code_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None) -> dict[str, Any]:
-    return _run_worker(state, "code", CodeWorker, tool_registry, "code_result", event_sink)
+def code_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None, model_gateway: Any = None) -> dict[str, Any]:
+    return _run_worker(state, "code", CodeWorker, tool_registry, "code_result", event_sink, model_gateway)
 
 
-def orm_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None) -> dict[str, Any]:
-    return _run_worker(state, "orm", ORMWorker, tool_registry, "orm_result", event_sink)
+def orm_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None, model_gateway: Any = None) -> dict[str, Any]:
+    return _run_worker(state, "orm", ORMWorker, tool_registry, "orm_result", event_sink, model_gateway)
 
 
-def merge_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None) -> dict[str, Any]:
+def merge_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any = None, model_gateway: Any = None) -> dict[str, Any]:
     normalized_state = dict(state)
     if normalized_state.get("orm_result") is None:
         normalized_state["orm_result"] = {
@@ -76,7 +77,7 @@ def merge_node(state: AgentState, tool_registry: ToolRegistry, event_sink: Any =
             "relations": [],
             "message": "No ORM files found, skipping",
         }
-    update = _run_worker(normalized_state, "merge", MergeWorker, tool_registry, "merge_result", event_sink)
+    update = _run_worker(normalized_state, "merge", MergeWorker, tool_registry, "merge_result", event_sink, model_gateway)
     merge_result = update.get("merge_result")
     if merge_result:
         attach_merge_lineage(
@@ -117,6 +118,7 @@ def _run_worker(
     tool_registry: ToolRegistry,
     result_key: str,
     event_sink: Any = None,
+    model_gateway: Any = None,
 ) -> dict[str, Any]:
     start = time.time()
     identity = RunIdentity(
@@ -136,10 +138,20 @@ def _run_worker(
         tool_registry,
         run_context=run_context,
         tool_runtime=tool_registry.runtime,
+        model_gateway=model_gateway,
     )
     worker.reset_call_log()
     try:
-        output = worker.run(dict(state))
+        mode = configured_worker_mode(worker_id)
+        worker_context = dict(state)
+        if mode == "legacy":
+            output = worker.run(worker_context)
+        else:
+            output = HybridWorkerRunner(
+                run_context=run_context,
+                tool_runtime=tool_registry.runtime,
+                model_gateway=model_gateway,
+            ).run(worker_id, worker, worker_context, mode)
         if not isinstance(output, dict):
             raise TypeError(f"{worker_id} worker returned a non-object result")
         duration_ms = int((time.time() - start) * 1000)

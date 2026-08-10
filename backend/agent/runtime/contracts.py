@@ -223,6 +223,20 @@ class RuntimeEvent(StrictContract):
         "usage.updated",
         "guardrail.passed",
         "guardrail.blocked",
+        "worker.started",
+        "worker.completed",
+        "worker.degraded",
+        "worker.failed",
+        "collector.started",
+        "collector.completed",
+        "verifier.started",
+        "verifier.completed",
+        "artifact.created",
+        "evidence.created",
+        "relation.proposed",
+        "critic.started",
+        "critic.evidence_requested",
+        "critic.completed",
     ]
     status: str
     schema_version: Literal["2.0"] = CONTRACT_VERSION
