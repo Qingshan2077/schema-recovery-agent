@@ -1,4 +1,5 @@
-﻿import { Database, FileCode2, GitMerge, Network, Workflow } from "lucide-react";
+import { Database, FileCode2, GitMerge, Network, Workflow } from "lucide-react";
+import { useI18n } from "../../i18n/LanguageContext";
 import type { SurveyOutput } from "../../types/api";
 
 interface SidebarProps {
@@ -6,19 +7,20 @@ interface SidebarProps {
 }
 
 export function Sidebar({ survey }: SidebarProps) {
+  const { t } = useI18n();
   const summary = survey?.summary;
   const items = [
-    { label: "表", value: summary?.total_tables ?? "-", icon: Database },
-    { label: "存储过程", value: summary?.total_procedures ?? "-", icon: Workflow },
-    { label: "视图", value: summary?.total_views ?? "-", icon: Network },
-    { label: "ORM", value: summary?.total_orm_files ?? "-", icon: FileCode2 }
+    { label: t("table"), value: summary?.total_tables ?? "-", icon: Database },
+    { label: t("storedProcedure"), value: summary?.total_procedures ?? "-", icon: Workflow },
+    { label: t("view"), value: summary?.total_views ?? "-", icon: Network },
+    { label: t("orm"), value: summary?.total_orm_files ?? "-", icon: FileCode2 }
   ];
 
   return (
     <aside className="sidebar">
       <section className="sidebar-section">
-        <h2>数据库概况</h2>
-        <p>{survey?.server_info?.database ?? "等待分析结果"}</p>
+        <h2>{t("databaseOverview")}</h2>
+        <p>{survey?.server_info?.database ?? t("waitingAnalysis")}</p>
         <div className="sidebar-metrics">
           {items.map((item) => (
             <div className="sidebar-metric" key={item.label}>
@@ -30,7 +32,7 @@ export function Sidebar({ survey }: SidebarProps) {
         </div>
       </section>
       <section className="sidebar-section">
-        <h2>分析链路</h2>
+        <h2>{t("analysisPipeline")}</h2>
         <ol className="pipeline-list">
           {["Survey", "Router", "Column", "Name", "Code", "ORM", "Merge"].map((step) => (
             <li key={step}>
@@ -43,4 +45,3 @@ export function Sidebar({ survey }: SidebarProps) {
     </aside>
   );
 }
-

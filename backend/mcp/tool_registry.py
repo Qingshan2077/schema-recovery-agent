@@ -8,40 +8,36 @@ from typing import Any, Callable
 class ToolRegistry:
     """In-process registry used by workers to execute named tools."""
 
-    _tools: dict[str, dict] = {}
+    def __init__(self) -> None:
+        self._tools: dict[str, dict] = {}
 
-    @classmethod
-    def clear(cls) -> None:
-        cls._tools = {}
+    def clear(self) -> None:
+        self._tools.clear()
 
-    @classmethod
     def register(
-        cls,
+        self,
         name: str,
         fn: Callable,
         description: str = "",
         input_schema: dict | None = None,
     ) -> None:
-        cls._tools[name] = {
+        self._tools[name] = {
             "fn": fn,
             "description": description,
             "input_schema": input_schema or {},
         }
 
-    @classmethod
-    def execute(cls, name: str, **kwargs) -> Any:
-        if name not in cls._tools:
-            raise ValueError(f"Tool '{name}' not registered. Available: {list(cls._tools.keys())}")
-        return cls._tools[name]["fn"](**kwargs)
+    def execute(self, name: str, **kwargs) -> Any:
+        if name not in self._tools:
+            raise ValueError(f"Tool '{name}' not registered. Available: {list(self._tools.keys())}")
+        return self._tools[name]["fn"](**kwargs)
 
-    @classmethod
-    def list_tools(cls) -> list[dict]:
+    def list_tools(self) -> list[dict]:
         return [
             {
                 "name": name,
                 "description": meta["description"],
                 "input_schema": meta["input_schema"],
             }
-            for name, meta in sorted(cls._tools.items())
+            for name, meta in sorted(self._tools.items())
         ]
-

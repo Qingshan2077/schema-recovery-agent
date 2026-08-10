@@ -1,7 +1,8 @@
-﻿"""Worker-backed LangGraph nodes."""
+"""Worker-backed LangGraph nodes."""
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -13,6 +14,8 @@ from backend.agent.workers.merge import MergeWorker
 from backend.agent.workers.name import NameWorker
 from backend.agent.workers.orm import ORMWorker
 from backend.agent.workers.survey import SurveyWorker
+from backend.core.status import coerce_worker_status
+from backend.core.lineage import attach_merge_lineage
 from backend.langgraph.state import AgentState, build_er_diagram
 from backend.mcp.tool_registry import ToolRegistry
 
@@ -23,10 +26,11 @@ STEP_ORDER = {"survey": 1, "router": 2, "column": 3, "name": 4, "code": 5, "orm"
 def survey_node(state: AgentState, tool_registry: ToolRegistry) -> dict[str, Any]:
     update = _run_worker(state, "survey", SurveyWorker, tool_registry, "survey_result")
     survey_result = update.get("survey_result")
-    if update.get("errors"):
-        return {**update, "status": "error"}
+    if update.get("errors") or not survey_result:
+        return update
 
-    plan = Router().plan_analysis(survey_result or {})
+    server_info = survey_result.get("server_info") or {}
+    plan = Router().plan_analysis(survey_result)
     router_step = {
         "step": _next_step("router"),
         "worker": "router",
@@ -34,7 +38,13 @@ def survey_node(state: AgentState, tool_registry: ToolRegistry) -> dict[str, Any
         "duration_ms": 0,
         "output": plan,
     }
-    return {**update, "plan": plan, "steps": update.get("steps", []) + [router_step]}
+    return {
+        **update,
+        "database_fingerprint": server_info.get("database_fingerprint"),
+        "snapshot_id": server_info.get("snapshot_id"),
+        "plan": plan,
+        "steps": update.get("steps", []) + [router_step],
+    }
 
 
 def column_node(state: AgentState, tool_registry: ToolRegistry) -> dict[str, Any]:
@@ -56,12 +66,23 @@ def orm_node(state: AgentState, tool_registry: ToolRegistry) -> dict[str, Any]:
 def merge_node(state: AgentState, tool_registry: ToolRegistry) -> dict[str, Any]:
     normalized_state = dict(state)
     if normalized_state.get("orm_result") is None:
-        normalized_state["orm_result"] = {"status": "success", "total_relations": 0, "relations": [], "message": "No ORM files found, skipping"}
+        normalized_state["orm_result"] = {
+            "status": "success",
+            "total_relations": 0,
+            "relations": [],
+            "message": "No ORM files found, skipping",
+        }
     update = _run_worker(normalized_state, "merge", MergeWorker, tool_registry, "merge_result")
     merge_result = update.get("merge_result")
     if merge_result:
+        attach_merge_lineage(
+            merge_result,
+            run_id=state["run_id"],
+            trace_id=state["trace_id"],
+            database_fingerprint=state.get("database_fingerprint"),
+            snapshot_id=state.get("snapshot_id"),
+        )
         update["er_diagram"] = build_er_diagram(merge_result)
-        update["status"] = "completed"
     return update
 
 
@@ -74,7 +95,12 @@ def skipped_orm_node(state: AgentState) -> dict[str, Any]:
         "output": {"message": "No ORM files found, skipping"},
     }
     return {
-        "orm_result": {"status": "success", "total_relations": 0, "relations": [], "message": "No ORM files found, skipping"},
+        "orm_result": {
+            "status": "success",
+            "total_relations": 0,
+            "relations": [],
+            "message": "No ORM files found, skipping",
+        },
         "steps": [step],
         "skipped_workers": ["orm"],
     }
@@ -89,11 +115,15 @@ def _run_worker(
 ) -> dict[str, Any]:
     start = time.time()
     worker = worker_factory(tool_registry)
+    worker.reset_call_log()
     try:
         output = worker.run(dict(state))
+        if not isinstance(output, dict):
+            raise TypeError(f"{worker_id} worker returned a non-object result")
         duration_ms = int((time.time() - start) * 1000)
-        status = "success" if output.get("status") == "success" else "partial"
+        status = coerce_worker_status(output.get("status"))
         call_log = worker.get_call_log()
+        error = str(output.get("error")) if status == "error" and output.get("error") else None
         step = {
             "step": _next_step(worker_id),
             "worker": worker_id,
@@ -102,22 +132,49 @@ def _run_worker(
             "tool_calls": call_log,
             "output": output,
         }
-        return {
-            result_key: output,
+        if error:
+            step["error"] = error
+        update: dict[str, Any] = {
+            "status": status,
             "steps": [step],
             "worker_call_log": [
-                {"worker_id": worker_id, "duration_ms": duration_ms, "status": status, "tool_calls": call_log}
+                {
+                    "worker_id": worker_id,
+                    "duration_ms": duration_ms,
+                    "status": status,
+                    "tool_calls": call_log,
+                }
             ],
-            "completed_workers": [worker_id],
         }
+        if status in {"success", "partial", "degraded"}:
+            update[result_key] = output
+            update["completed_workers"] = [worker_id]
+        else:
+            update["errors"] = [f"{worker_id}: {error or status}"]
+        return update
     except Exception as exc:
         duration_ms = int((time.time() - start) * 1000)
-        step = {"step": _next_step(worker_id), "worker": worker_id, "status": "error", "duration_ms": duration_ms, "error": str(exc)}
+        error = _safe_error(exc)
+        step = {
+            "step": _next_step(worker_id),
+            "worker": worker_id,
+            "status": "error",
+            "duration_ms": duration_ms,
+            "tool_calls": worker.get_call_log(),
+            "error": error,
+        }
         return {
             "status": "error",
             "steps": [step],
-            "worker_call_log": [{"worker_id": worker_id, "duration_ms": duration_ms, "status": "error", "tool_calls": []}],
-            "errors": [f"{worker_id}: {exc}"],
+            "worker_call_log": [
+                {
+                    "worker_id": worker_id,
+                    "duration_ms": duration_ms,
+                    "status": "error",
+                    "tool_calls": worker.get_call_log(),
+                }
+            ],
+            "errors": [f"{worker_id}: {error}"],
         }
 
 
@@ -125,3 +182,9 @@ def _next_step(worker_id: str) -> int:
     return STEP_ORDER.get(worker_id, 99)
 
 
+def _safe_error(error: Exception | str) -> str:
+    return re.sub(
+        r"(?i)(password|passwd|token|secret|api[_-]?key|authorization)\s*[:=]\s*[^,}\s]+",
+        r"\1=***",
+        str(error),
+    )[:1000]

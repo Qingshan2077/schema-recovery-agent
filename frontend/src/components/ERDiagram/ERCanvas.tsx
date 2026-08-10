@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import {
   Background,
   Controls,
@@ -8,6 +8,7 @@ import {
   useEdgesState,
   useNodesState
 } from "@xyflow/react";
+import { useI18n } from "../../i18n/LanguageContext";
 import type { ConfidenceLevel, ERDiagram, RelationDetail } from "../../types/api";
 import { buildGraph, relationKey, type RelationEdgePayload, type TableNodePayload } from "../../utils/graphLayout";
 import { ConfidenceDot } from "../common/ConfidenceBadge";
@@ -26,7 +27,15 @@ interface ERCanvasProps {
 const nodeTypes = { tableNode: TableNode };
 const edgeTypes = { relationEdge: RelationEdge };
 
+const filterLabels: Record<ConfidenceLevel, "all" | "high" | "medium" | "low"> = {
+  all: "all",
+  high: "high",
+  medium: "medium",
+  low: "low"
+};
+
 export function ERCanvas({ diagram, relations, filter, selectedRelation, onFilterChange, onRelationSelect }: ERCanvasProps) {
+  const { t } = useI18n();
   const [nodes, setNodes, onNodesChange] = useNodesState<TableNodePayload>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RelationEdgePayload>([]);
   const selectedEdgeId = selectedRelation ? relationKey(selectedRelation.source_table, selectedRelation.target_table, selectedRelation.fk_column) : undefined;
@@ -48,19 +57,18 @@ export function ERCanvas({ diagram, relations, filter, selectedRelation, onFilte
     setEdges((currentEdges) => currentEdges.map((edge) => ({ ...edge, selected: edge.id === selectedEdgeId })));
   }, [selectedEdgeId, setEdges]);
 
-
   return (
     <section className="er-section">
       <div className="section-toolbar">
         <div>
-          <h2>ER 图</h2>
-          <p>{nodes.length} 张表，{edges.length} 条当前可见关系</p>
+          <h2>{t("erDiagram")}</h2>
+          <p>{t("visibleRelations", { tables: nodes.length, relations: edges.length })}</p>
         </div>
-        <div className="segmented-control" role="group" aria-label="置信度筛选">
+        <div className="segmented-control" role="group" aria-label={t("confidenceFilter")}>
           {(["all", "high", "medium", "low"] as ConfidenceLevel[]).map((item) => (
             <button className={filter === item ? "active" : ""} type="button" key={item} onClick={() => onFilterChange(item)}>
               <ConfidenceDot level={item} />
-              {item === "all" ? "全部" : item === "high" ? "高" : item === "medium" ? "中" : "低"}
+              {t(filterLabels[item])}
             </button>
           ))}
         </div>
@@ -88,6 +96,3 @@ export function ERCanvas({ diagram, relations, filter, selectedRelation, onFilte
     </section>
   );
 }
-
-
-

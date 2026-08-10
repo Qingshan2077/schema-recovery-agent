@@ -1,7 +1,7 @@
-﻿import { Activity, BarChart3, GitBranch, Languages, Play, RefreshCw } from "lucide-react";
+import { Activity, BarChart3, GitBranch, Languages, MessageSquareText, Play, RefreshCw } from "lucide-react";
 import { useI18n } from "../../i18n/LanguageContext";
 
-type PageKey = "analysis" | "monitor" | "eval";
+type PageKey = "analysis" | "chat" | "monitor" | "eval";
 
 interface HeaderProps {
   activePage: PageKey;
@@ -25,6 +25,10 @@ export function Header({ activePage, onPageChange, onAnalyze, analyzing }: Heade
         <button className={activePage === "analysis" ? "active" : ""} type="button" onClick={() => onPageChange("analysis")}>
           <GitBranch size={16} />
           {t("navAnalysis")}
+        </button>
+        <button className={activePage === "chat" ? "active" : ""} type="button" onClick={() => onPageChange("chat")}>
+          <MessageSquareText size={16} />
+          {t("navChat")}
         </button>
         <button className={activePage === "monitor" ? "active" : ""} type="button" onClick={() => onPageChange("monitor")}>
           <Activity size={16} />

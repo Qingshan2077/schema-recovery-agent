@@ -1,26 +1,41 @@
-﻿"""FastAPI entry point for Schema Recovery Agent."""
+"""FastAPI entry point for Schema Recovery Agent."""
 
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Iterable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
 from backend.agent.orchestrator import Orchestrator
+from backend.agent.workers.dba import DBAWorker
+from backend.agent.workers.qa import QAWorker
 from backend.config import Config
-from backend.schemas import normalize_step, stream_event
+from backend.core.identity import RunIdentity
+from backend.core.legacy_ids import LegacyIdStore
+from backend.core.run_store import RunStore
+from backend.core.status import RunStatus
+from backend.schemas import (
+    ChatRequest,
+    EventSequencer,
+    analysis_result_v1,
+    normalize_step,
+    sanitize_analysis_result,
+)
 
 app = FastAPI(title="Schema Recovery Agent", version="1.0.0")
 
 
 @app.on_event("startup")
-async def startup():
+async def startup() -> None:
     from backend.agent.memory.global_memory import GlobalMemory
     from backend.mcp.server import init_mcp_tools
 
     app.state.tool_registry = init_mcp_tools()
+    app.state.run_store = RunStore()
+    app.state.legacy_id_store = LegacyIdStore()
     app.state.schema_graph = None
     app.state.langgraph_error = None
     if Config.LANGGRAPH_ENABLED:
@@ -29,12 +44,12 @@ async def startup():
 
             app.state.schema_graph = build_schema_recovery_graph(app.state.tool_registry)
         except Exception as exc:
-            app.state.langgraph_error = str(exc)
+            app.state.langgraph_error = _public_error(exc)
     GlobalMemory()
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "langgraph_enabled": Config.LANGGRAPH_ENABLED,
@@ -44,13 +59,125 @@ async def health():
 
 
 @app.post("/api/analyze")
-async def run_analysis():
-    return _orchestrator().run_full_analysis()
+async def run_analysis() -> dict[str, Any]:
+    identity = RunIdentity.create()
+    store = _run_store()
+    store.start(identity, engine="langgraph" if Config.LANGGRAPH_ENABLED else "manual")
+    result = _orchestrator().run_full_analysis(identity=identity)
+    store.complete(identity.run_id, sanitize_analysis_result(result))
+    return analysis_result_v1(result)
 
 
 @app.post("/api/analyze/stream")
-async def analyze_stream():
-    return StreamingResponse(_analysis_stream(), media_type="application/x-ndjson")
+async def analyze_stream() -> StreamingResponse:
+    identity = RunIdentity.create()
+    _run_store().start(identity, engine="langgraph" if Config.LANGGRAPH_ENABLED else "manual")
+    return StreamingResponse(
+        _analysis_stream(identity),
+        media_type="application/x-ndjson",
+        headers={"X-Run-ID": identity.run_id, "X-Trace-ID": identity.trace_id},
+    )
+
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest) -> dict[str, Any]:
+    thread_id = _legacy_id_store().resolve(
+        request.thread_id or request.session_id,
+        entity_type="thread",
+    )
+    identity = RunIdentity.create(thread_id=thread_id)
+    intent = classify_chat_intent(request.message, request.pending_operation)
+    shared_context = {
+        "question": request.message,
+        "messages": _chat_history_without_current(request),
+        "thread_id": thread_id,
+        "run_id": identity.run_id,
+        "trace_id": identity.trace_id,
+        "llm_available": bool(Config.LLM_API_KEY),
+    }
+
+    if intent == "ddl":
+        worker = DBAWorker(app.state.tool_registry)
+        result = worker.run(
+            {
+                **shared_context,
+                "confirmed": request.confirmed,
+                "pending_operation": request.pending_operation,
+            }
+        )
+        if result["status"] == "need_confirmation":
+            return {
+                "type": "confirmation",
+                "session_id": thread_id,
+                **identity.model_dump(),
+                "message": result["message"],
+                "pending": result.get("pending_operation"),
+                "safety_level": result.get("safety_level"),
+            }
+        return {
+            "type": "result" if result["status"] == "success" else "error",
+            "session_id": thread_id,
+            **identity.model_dump(),
+            "message": result["message"],
+            "ddl_executed": result.get("ddl_executed"),
+            "new_analysis": (
+                analysis_result_v1(result["new_analysis"])
+                if result.get("new_analysis")
+                else None
+            ),
+            "data": result.get("data"),
+        }
+
+    worker = QAWorker(app.state.tool_registry)
+    result = worker.run(shared_context)
+    return {
+        "type": "answer",
+        "session_id": thread_id,
+        **identity.model_dump(),
+        "content": result["answer"],
+        "intent": result.get("intent"),
+        "data": result.get("data"),
+    }
+
+
+def classify_chat_intent(question: str, pending_operation: dict[str, Any] | None = None) -> str:
+    if pending_operation:
+        return "ddl"
+    q = question.lower()
+    ddl_keywords = [
+        "删除",
+        "删掉",
+        "新建",
+        "创建",
+        "添加",
+        "新增",
+        "修改",
+        "改成",
+        "加一个",
+        "建一个",
+        "建表",
+        "drop",
+        "create",
+        "alter",
+        "truncate",
+        "rename",
+        "add column",
+    ]
+    readonly_dba_keywords = ["建表语句", "show create"]
+    if any(keyword in q for keyword in readonly_dba_keywords):
+        return "ddl"
+    return "ddl" if any(keyword in q for keyword in ddl_keywords) else "query"
+
+
+def _chat_history_without_current(request: ChatRequest) -> list[dict[str, Any]]:
+    history = [message.model_dump() for message in request.history]
+    if (
+        history
+        and history[-1].get("role") == "user"
+        and history[-1].get("content", "").strip() == request.message.strip()
+    ):
+        return history[:-1]
+    return history
 
 
 def _orchestrator() -> Orchestrator:
@@ -58,26 +185,56 @@ def _orchestrator() -> Orchestrator:
     return Orchestrator(app.state.tool_registry, graph=graph)
 
 
-def _analysis_stream() -> Iterable[str]:
-    orch = _orchestrator()
+def _analysis_stream(identity: RunIdentity) -> Iterable[str]:
+    orchestrator = _orchestrator()
+    store = _run_store()
+    sequencer = EventSequencer(identity)
+
+    yield _event_line(
+        sequencer,
+        store,
+        legacy_type="started",
+        event_type="run.started",
+        status=RunStatus.RUNNING,
+        total_steps=7,
+    )
+
     if not Config.LANGGRAPH_ENABLED or getattr(app.state, "schema_graph", None) is None:
-        result = orch.run_manual_analysis(
+        result = orchestrator.run_manual_analysis(
+            identity=identity,
             graph_meta={
-                "engine": "manual_fallback" if Config.LANGGRAPH_ENABLED else "manual",
-                "fallback_reason": getattr(app.state, "langgraph_error", None) or "langgraph_disabled",
-            }
+                "engine": "manual",
+                "reason": getattr(app.state, "langgraph_error", None) or "langgraph_disabled",
+            },
         )
-        yield _json_line(stream_event(type="complete", session_id=result.get("session_id"), data=result))
+        store.complete(identity.run_id, sanitize_analysis_result(result))
+        yield _event_line(
+            sequencer,
+            store,
+            legacy_type="complete",
+            event_type="run.completed" if result["run_status"] != "error" else "run.failed",
+            status=result["run_status"],
+            data=analysis_result_v1(result),
+        )
         return
 
     from backend.langgraph import build_initial_state, build_result_from_state
 
-    initial_state = build_initial_state()
+    initial_state = build_initial_state(
+        identity=identity,
+        snapshot_db_path=orchestrator.snapshot_db_path,
+    )
     final_state: dict[str, Any] = initial_state
     emitted_step_keys: set[tuple[str, int]] = set()
 
-    yield _json_line(stream_event(type="started", session_id=initial_state["session_id"], total_steps=initial_state["total_steps"]))
-    yield _json_line(stream_event(type="node_started", session_id=initial_state["session_id"], node="survey_node"))
+    yield _event_line(
+        sequencer,
+        store,
+        legacy_type="node_started",
+        event_type="step.started",
+        node="survey_node",
+        payload={"node": "survey_node"},
+    )
     try:
         for snapshot in app.state.schema_graph.stream(initial_state, stream_mode="values"):
             final_state = snapshot
@@ -87,26 +244,99 @@ def _analysis_stream() -> Iterable[str]:
                     continue
                 emitted_step_keys.add(step_key)
                 normalized_step = normalize_step(step)
-                yield _json_line(
-                    stream_event(
-                        type="node_complete",
-                        session_id=snapshot["session_id"],
-                        node=f"{step.get('worker', 'unknown')}_node",
-                        step=normalized_step,
-                        progress={"completed": len(emitted_step_keys), "total": snapshot.get("total_steps", 7)},
-                    )
+                yield _event_line(
+                    sequencer,
+                    store,
+                    legacy_type="node_complete",
+                    event_type="step.completed",
+                    node=f"{step.get('worker', 'unknown')}_node",
+                    step=normalized_step,
+                    progress={"completed": len(emitted_step_keys), "total": snapshot.get("total_steps", 7)},
+                    payload={"worker": step.get("worker"), "step_status": step.get("status")},
                 )
                 next_node = _next_node_after(step.get("worker"), snapshot)
                 if next_node:
-                    yield _json_line(stream_event(type="node_started", session_id=snapshot["session_id"], node=next_node))
+                    yield _event_line(
+                        sequencer,
+                        store,
+                        legacy_type="node_started",
+                        event_type="step.started",
+                        node=next_node,
+                        payload={"node": next_node},
+                    )
+            yield _event_line(
+                sequencer,
+                store,
+                legacy_type="heartbeat",
+                event_type="heartbeat",
+                payload={"completed_steps": len(emitted_step_keys)},
+            )
 
         result = build_result_from_state(final_state)
-        if final_state.get("merge_result"):
-            orch._persist_and_record(final_state["session_id"], orch._context_from_state(final_state), result["steps"])
-        yield _json_line(stream_event(type="complete", session_id=final_state["session_id"], data=result))
+        context = orchestrator._context_from_state(final_state)
+        final_status = orchestrator._persist_and_record(
+            identity,
+            context,
+            result["steps"],
+            result["run_status"],
+        )
+        result["status"] = final_status.value
+        result["run_status"] = final_status.value
+        result["total_steps"] = len(result["steps"])
+        store.complete(identity.run_id, sanitize_analysis_result(result))
+        yield _event_line(
+            sequencer,
+            store,
+            legacy_type="complete",
+            event_type="run.completed" if final_status != RunStatus.ERROR else "run.failed",
+            status=final_status,
+            data=analysis_result_v1(result),
+        )
     except Exception as exc:
-        fallback = orch.run_manual_analysis(graph_meta={"engine": "manual_fallback", "fallback_reason": str(exc)})
-        yield _json_line(stream_event(type="complete", session_id=fallback.get("session_id"), data=fallback))
+        context = orchestrator._context_from_state(final_state)
+        failure = orchestrator.build_failed_result(
+            identity,
+            error=str(exc),
+            steps=final_state.get("steps", []),
+            context=context,
+            graph_meta={
+                "engine": "langgraph",
+                "fallback_disabled": True,
+                "fallback_reason": str(exc),
+            },
+        )
+        store.complete(identity.run_id, sanitize_analysis_result(failure))
+        yield _event_line(
+            sequencer,
+            store,
+            legacy_type="error",
+            event_type="run.failed",
+            status=RunStatus.ERROR,
+            error=failure.get("error"),
+            data=analysis_result_v1(failure),
+        )
+
+
+def _event_line(
+    sequencer: EventSequencer,
+    store: RunStore,
+    **event_args: Any,
+) -> str:
+    event = sequencer.next(**event_args)
+    store.record_sequence(sequencer.identity.run_id, sequencer.sequence)
+    if not Config.STREAM_EVENTS_V2:
+        legacy_keys = {
+            "type",
+            "session_id",
+            "total_steps",
+            "node",
+            "step",
+            "progress",
+            "data",
+            "error",
+        }
+        event = {key: value for key, value in event.items() if key in legacy_keys}
+    return _json_line(event)
 
 
 def _next_node_after(worker: str | None, snapshot: dict[str, Any]) -> str | None:
@@ -126,20 +356,62 @@ def _json_line(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str) + "\n"
 
 
+def _public_error(error: Exception | str) -> str:
+    return re.sub(
+        r"(?i)(password|passwd|token|secret|api[_-]?key|authorization)\s*[:=]\s*[^,}\s]+",
+        r"\1=***",
+        str(error),
+    )[:1000]
+
+
+def _run_store() -> RunStore:
+    store = getattr(app.state, "run_store", None)
+    if store is None:
+        store = RunStore()
+        app.state.run_store = store
+    return store
+
+
+def _legacy_id_store() -> LegacyIdStore:
+    store = getattr(app.state, "legacy_id_store", None)
+    if store is None:
+        store = LegacyIdStore()
+        app.state.legacy_id_store = store
+    return store
+
+
+@app.get("/api/v2/runs/{run_id}")
+async def get_run(run_id: str) -> dict[str, Any]:
+    record = _run_store().get(run_id)
+    if record is None:
+        from backend.monitor.recorder import MonitorRecorder
+
+        persisted = MonitorRecorder().get_run(run_id)
+        if persisted:
+            return persisted
+        raise HTTPException(status_code=404, detail="run_not_found")
+    return record
+
+
 @app.get("/api/analyze/{session_id}")
-async def get_analysis(session_id: str):
+async def get_analysis(session_id: str) -> dict[str, Any]:
+    record = _run_store().get(session_id)
+    if record:
+        return record
+
     from backend.agent.memory.schema_memory import SchemaMemory
 
     memory = SchemaMemory()
     return {
         "session_id": session_id,
+        "run_id": session_id if session_id.startswith("run_") else None,
         "history": memory.get_history(limit=10),
         "note": "Analysis results are persisted as summary/history records.",
     }
 
 
 @app.get("/api/memory/query")
-async def query_memory(source_table: str | None = None, target_table: str | None = None):
+async def query_memory(source_table: str | None = None, target_table: str | None = None) -> dict[str, Any]:
     from backend.agent.memory.schema_memory import SchemaMemory
 
     memory = SchemaMemory()
@@ -150,35 +422,39 @@ async def query_memory(source_table: str | None = None, target_table: str | None
 
 
 @app.get("/api/monitor/stats")
-async def get_monitor_stats():
+async def get_monitor_stats() -> dict[str, Any]:
     from backend.monitor.recorder import MonitorRecorder
 
     return MonitorRecorder().get_stats()
 
 
 @app.get("/api/monitor/contributions")
-async def get_contributions():
+async def get_contributions() -> dict[str, Any]:
     from backend.monitor.weight_updater import WeightUpdater
 
     return WeightUpdater().get_evidence_source_overview()
 
 
 @app.get("/api/monitor/weight-suggestions")
-async def get_weight_suggestions():
+async def get_weight_suggestions() -> dict[str, Any]:
     from backend.monitor.weight_updater import WeightUpdater
 
     return WeightUpdater().suggest_weight_adjustment()
 
 
-@app.get("/api/eval/run")
-async def run_evaluation():
+@app.post("/api/eval/run")
+@app.post("/api/v2/evals/runs")
+async def run_evaluation() -> dict[str, Any]:
     from backend.eval.report import EvalReporter
 
-    return EvalReporter().run_full_report()
+    return EvalReporter().run_and_save_report()
 
 
 @app.get("/api/eval/report")
-async def get_latest_report():
+async def get_latest_report() -> dict[str, Any]:
     from backend.eval.report import EvalReporter
 
-    return EvalReporter().run_full_report()
+    report = EvalReporter().get_latest_report()
+    if report is None:
+        raise HTTPException(status_code=404, detail="eval_report_not_found")
+    return report

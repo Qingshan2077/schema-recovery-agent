@@ -13,7 +13,7 @@ class GlobalMemory:
         self._init_db()
 
     def _init_db(self):
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute(
@@ -81,7 +81,6 @@ class GlobalMemory:
             conn.commit()
         finally:
             conn.close()
-
 
 
 

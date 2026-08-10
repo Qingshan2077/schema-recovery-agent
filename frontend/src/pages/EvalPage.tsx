@@ -1,48 +1,51 @@
-﻿import { BarChart3, CheckCircle2, Gauge, RefreshCw, Target } from "lucide-react";
+import { BarChart3, CheckCircle2, Gauge, RefreshCw, Target } from "lucide-react";
 import { SourceContributionChart } from "../components/Dashboard/SourceContributionChart";
 import { StatCard } from "../components/Dashboard/StatCard";
 import { EmptyState } from "../components/common/EmptyState";
 import { useEval } from "../hooks/useEval";
+import { useI18n } from "../i18n/LanguageContext";
 
 export function EvalPage() {
+  const { t } = useI18n();
   const { report, loading, error, runEval } = useEval();
   const quantitative = report?.quantitative;
+  const displayError = translateKnownError(error, "evalRequestFailed", t("evalRequestFailed"));
 
   return (
     <div className="page-stack">
       <div className="page-header-row">
         <div>
-          <h2>评测报告</h2>
-          <p>基于预标注关系集计算精确匹配、部分 FK 命中、目标表错误和置信度校准。</p>
+          <h2>{t("evalTitle")}</h2>
+          <p>{t("evalDescription")}</p>
         </div>
         <button className="primary-button" type="button" onClick={runEval} disabled={loading}>
           <RefreshCw className={loading ? "spin" : ""} size={16} />
-          {loading ? "评测中" : "运行评测"}
+          {loading ? t("evaluating") : t("runEval")}
         </button>
       </div>
 
-      {error ? <div className="error-banner">{error}</div> : null}
+      {displayError ? <div className="error-banner">{displayError}</div> : null}
 
       {!report ? (
         <EmptyState
-          title="尚未运行评测"
-          description="运行评测会触发一次端到端分析，并对照预期关系生成质量指标。"
-          actionLabel="运行评测"
+          title={t("noEvalTitle")}
+          description={t("noEvalDescription")}
+          actionLabel={t("runEval")}
           onAction={runEval}
         />
       ) : (
         <>
           <section className="overview-grid">
-            <StatCard title="Precision" value={formatScore(quantitative?.precision)} subtitle="精确关系查准率" icon={Target} color="green" />
-            <StatCard title="Recall" value={formatScore(quantitative?.recall)} subtitle="精确关系查全率" icon={Gauge} color="blue" />
-            <StatCard title="F1" value={formatScore(quantitative?.f1_score)} subtitle="综合指标" icon={BarChart3} color="yellow" />
-            <StatCard title="High-P" value={formatScore(quantitative?.high_confidence_precision)} subtitle="高置信度校准" icon={CheckCircle2} color="slate" />
-            <StatCard title="FK Recall" value={formatScore(quantitative?.partial_fk_recall)} subtitle="FK 部分命中" icon={Gauge} color="blue" />
+            <StatCard title="Precision" value={formatScore(quantitative?.precision)} subtitle={t("exactPrecision")} icon={Target} color="green" />
+            <StatCard title="Recall" value={formatScore(quantitative?.recall)} subtitle={t("exactRecall")} icon={Gauge} color="blue" />
+            <StatCard title="F1" value={formatScore(quantitative?.f1_score)} subtitle={t("f1Description")} icon={BarChart3} color="yellow" />
+            <StatCard title="High-P" value={formatScore(quantitative?.high_confidence_precision)} subtitle={t("highConfidenceCalibration")} icon={CheckCircle2} color="slate" />
+            <StatCard title="FK Recall" value={formatScore(quantitative?.partial_fk_recall)} subtitle={t("partialFkHit")} icon={Gauge} color="blue" />
           </section>
 
           <section className="dashboard-grid">
             <div className="panel">
-              <h3>定量细节</h3>
+              <h3>{t("quantitativeDetails")}</h3>
               <div className="metric-list">
                 {Object.entries(quantitative?.details ?? {}).map(([key, value]) => (
                   <div className="metric-row" key={key}>
@@ -53,15 +56,15 @@ export function EvalPage() {
               </div>
             </div>
             <div className="panel">
-              <h3>Monitor 摘要</h3>
+              <h3>{t("monitorSummary")}</h3>
               <SourceContributionChart data={report.monitor?.worker_stats ? {} : {}} />
               <div className="metric-list">
                 <div className="metric-row">
-                  <span>分析次数</span>
+                  <span>{t("analysisCount")}</span>
                   <strong>{report.monitor?.total_analyses ?? 0}</strong>
                 </div>
                 <div className="metric-row">
-                  <span>平均耗时</span>
+                  <span>{t("avgDuration")}</span>
                   <strong>{report.monitor?.avg_duration_ms ?? 0} ms</strong>
                 </div>
               </div>
@@ -84,4 +87,8 @@ function formatScore(value?: number): string {
 
 function formatMetricName(key: string): string {
   return key.replaceAll("_", " ");
+}
+
+function translateKnownError(error: string | undefined, source: string, target: string): string | undefined {
+  return error?.replace(source, target);
 }

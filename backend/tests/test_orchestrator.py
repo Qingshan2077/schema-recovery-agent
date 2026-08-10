@@ -6,7 +6,10 @@ from backend.mcp.server import init_mcp_tools
 def test_orchestrator_full_analysis():
     registry = init_mcp_tools()
     result = Orchestrator(registry).run_full_analysis()
-    assert result["status"] == "completed"
+    assert result["status"] == "success"
+    assert result["run_status"] == "success"
+    assert result["run_id"].startswith("run_")
+    assert result["trace_id"].startswith("trc_")
     assert result["total_steps"] >= 6
     assert "er_diagram" in result
     assert result["er_diagram"]["table_count"] > 0
@@ -25,4 +28,3 @@ def test_router():
     )
     assert len(plan["phases"]) == 4
     assert plan["summary"]["tables"] == 30
-

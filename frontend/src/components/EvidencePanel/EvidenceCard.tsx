@@ -1,4 +1,5 @@
 import { Code2, Database, FileCode2, Fingerprint, Network } from "lucide-react";
+import { useI18n } from "../../i18n/LanguageContext";
 import type { EvidenceChainItem } from "../../types/api";
 
 interface EvidenceCardProps {
@@ -18,6 +19,7 @@ const iconMap = {
 };
 
 export function EvidenceCard({ item, index }: EvidenceCardProps) {
+  const { t } = useI18n();
   const Icon = iconMap[item.type as keyof typeof iconMap] ?? Database;
   return (
     <article className={`evidence-card evidence-${item.type}`}>
@@ -26,10 +28,10 @@ export function EvidenceCard({ item, index }: EvidenceCardProps) {
           <Icon size={16} />
           <strong>{index + 1}. {formatEvidenceType(item.type)}</strong>
         </div>
-        <span>权重 {item.weight.toFixed(2)}</span>
+        <span>{t("weight")} {item.weight.toFixed(2)}</span>
       </header>
-      <p>{item.detail || "无详细说明"}</p>
-      <footer>证据强度 {(item.strength * 100).toFixed(0)}%</footer>
+      <p>{item.detail || t("noEvidenceDetail")}</p>
+      <footer>{t("evidenceStrength")} {(item.strength * 100).toFixed(0)}%</footer>
     </article>
   );
 }

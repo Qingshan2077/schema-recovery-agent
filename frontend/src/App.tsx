@@ -1,18 +1,24 @@
-﻿import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Header } from "./components/Layout/Header";
 import { Sidebar } from "./components/Layout/Sidebar";
 import { useAnalysis } from "./hooks/useAnalysis";
-import { I18nContext, type Language, translate } from "./i18n/LanguageContext";
+import { I18nContext, type Language, type TranslationKey, translate } from "./i18n/LanguageContext";
 import { AnalysisPage } from "./pages/AnalysisPage";
+import { ChatPage } from "./pages/ChatPage";
 import { EvalPage } from "./pages/EvalPage";
 import { MonitorPage } from "./pages/MonitorPage";
 import type { SurveyOutput } from "./types/api";
 
-type PageKey = "analysis" | "monitor" | "eval";
+export type PageKey = "analysis" | "chat" | "monitor" | "eval";
+
+function getInitialLanguage(): Language {
+  const stored = localStorage.getItem("schema-agent-language");
+  return stored === "en" || stored === "zh" ? stored : "zh";
+}
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageKey>("analysis");
-  const [language, setLanguage] = useState<Language>(() => (localStorage.getItem("schema-agent-language") as Language) || "zh");
+  const [language, setLanguage] = useState<Language>(getInitialLanguage);
   const analysis = useAnalysis();
   const survey = useMemo(
     () => analysis.data?.steps?.find((step) => step.worker === "survey")?.output as SurveyOutput | undefined,
@@ -29,7 +35,7 @@ export default function App() {
       language,
       setLanguage: handleLanguageChange,
       toggleLanguage: () => handleLanguageChange(language === "zh" ? "en" : "zh"),
-      t: (key: Parameters<typeof translate>[1], values?: Record<string, string | number>) => translate(language, key, values)
+      t: (key: TranslationKey, values?: Record<string, string | number>) => translate(language, key, values)
     }),
     [handleLanguageChange, language]
   );
@@ -58,6 +64,7 @@ export default function App() {
                 onRunAnalysis={analysis.runAnalysis}
               />
             ) : null}
+            {activePage === "chat" ? <ChatPage /> : null}
             {activePage === "monitor" ? <MonitorPage /> : null}
             {activePage === "eval" ? <EvalPage /> : null}
           </main>

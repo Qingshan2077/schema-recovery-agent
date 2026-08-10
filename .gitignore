@@ -47,3 +47,7 @@ frontend/build/
 
 # Docker
 .dockerignore
+
+docs/
+*.md
+!README.md

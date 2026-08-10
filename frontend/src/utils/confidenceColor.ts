@@ -6,13 +6,6 @@ export function confidenceLevel(confidence: number): Exclude<ConfidenceLevel, "a
   return "low";
 }
 
-export function confidenceLabel(confidence: number): string {
-  const level = confidenceLevel(confidence);
-  if (level === "high") return "高置信度";
-  if (level === "medium") return "中置信度";
-  return "低置信度";
-}
-
 export function confidenceColor(confidence: number): string {
   const level = confidenceLevel(confidence);
   if (level === "high") return "#22c55e";

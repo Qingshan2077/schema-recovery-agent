@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { MemoryQueryResult, MonitorStats } from "../types/api";
 
+const MONITOR_ERROR_KEY = "monitorRequestFailed";
+
 export function useMonitor() {
   const [stats, setStats] = useState<MonitorStats>();
   const [contributions, setContributions] = useState<Record<string, { avg_percentage: number; appearances: number }>>({});
@@ -18,14 +20,14 @@ export function useMonitor() {
         fetch("/api/memory/query")
       ]);
       if (!statsResponse.ok || !contributionsResponse.ok || !memoryResponse.ok) {
-        throw new Error("监控数据请求失败");
+        throw new Error(MONITOR_ERROR_KEY);
       }
       setStats((await statsResponse.json()) as MonitorStats);
       setContributions(await contributionsResponse.json());
       const memory = (await memoryResponse.json()) as MemoryQueryResult;
       setHistory(memory.history ?? []);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "监控数据请求失败");
+      setError(error instanceof Error ? error.message : MONITOR_ERROR_KEY);
     } finally {
       setLoading(false);
     }

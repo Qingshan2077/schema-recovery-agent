@@ -1,28 +1,37 @@
+import { useI18n, type TranslationKey } from "../../i18n/LanguageContext";
+
 interface SourceContributionChartProps {
   data: Record<string, { avg_percentage?: number; percentage?: number; appearances?: number; count?: number }>;
 }
 
-const labels: Record<string, string> = {
+const labelKeys: Record<string, TranslationKey> = {
+  column_name_suffix: "columnNameSuffix",
+  primary_key_name_match: "primaryKeyMatch",
+  naming_convention_match: "namingConvention",
+  index_exists: "indexEvidence",
+  naming_cross_table: "crossTableNaming"
+};
+
+const staticLabels: Record<string, string> = {
   sql_join: "SQL JOIN",
   orm_association: "ORM Association",
-  orm_collection: "ORM Collection",
-  column_name_suffix: "列名后缀",
-  primary_key_name_match: "主键匹配",
-  naming_convention_match: "命名约定",
-  index_exists: "索引证据",
-  naming_cross_table: "跨表命名"
+  orm_collection: "ORM Collection"
 };
 
 export function SourceContributionChart({ data }: SourceContributionChartProps) {
-  const entries = Object.entries(data).map(([source, item]) => ({
-    source,
-    label: labels[source] ?? source,
-    value: item.avg_percentage ?? item.percentage ?? 0,
-    count: item.appearances ?? item.count ?? 0
-  }));
+  const { t } = useI18n();
+  const entries = Object.entries(data).map(([source, item]) => {
+    const labelKey = labelKeys[source];
+    return {
+      source,
+      label: labelKey ? t(labelKey) : staticLabels[source] ?? source,
+      value: item.avg_percentage ?? item.percentage ?? 0,
+      count: item.appearances ?? item.count ?? 0
+    };
+  });
 
   if (!entries.length) {
-    return <div className="table-empty">暂无证据贡献数据</div>;
+    return <div className="table-empty">{t("noContributionData")}</div>;
   }
 
   return (
@@ -31,7 +40,7 @@ export function SourceContributionChart({ data }: SourceContributionChartProps) 
         <div className="source-row" key={entry.source}>
           <div className="source-label">
             <span>{entry.label}</span>
-            <small>{entry.count} 次</small>
+            <small>{t("occurrenceCount", { count: entry.count })}</small>
           </div>
           <div className="source-bar-track">
             <div className={`source-bar source-${entry.source}`} style={{ width: `${Math.max(4, entry.value)}%` }} />

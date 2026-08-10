@@ -1,12 +1,14 @@
 import type { MonitorStats } from "../../types/api";
+import { useI18n } from "../../i18n/LanguageContext";
 
 interface WorkerPerformanceTableProps {
   workers: NonNullable<MonitorStats["worker_stats"]>;
 }
 
 export function WorkerPerformanceTable({ workers }: WorkerPerformanceTableProps) {
+  const { t } = useI18n();
   if (!workers.length) {
-    return <div className="table-empty">暂无 Worker 运行数据</div>;
+    return <div className="table-empty">{t("noWorkerData")}</div>;
   }
   return (
     <div className="table-wrap">
@@ -14,9 +16,9 @@ export function WorkerPerformanceTable({ workers }: WorkerPerformanceTableProps)
         <thead>
           <tr>
             <th>Worker</th>
-            <th>次数</th>
-            <th>平均耗时</th>
-            <th>成功率</th>
+            <th>{t("runs")}</th>
+            <th>{t("avgDuration")}</th>
+            <th>{t("successRate")}</th>
           </tr>
         </thead>
         <tbody>

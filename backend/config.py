@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     DATA_DIR: str = "data"
     DOCKER_DATA_DIR: str = "/app/data"
     LANGGRAPH_ENABLED: bool = True
+    RUNTIME_IDENTITY_V2: bool = True
+    STREAM_EVENTS_V2: bool = True
+    QA_REGEX_BASELINE_FIX: bool = True
+    TENANT_ID: str = "default"
+    PROJECT_ID: str = "default"
+    EVAL_REPORT_DIR: str = "data/eval/reports"
 
     WEIGHT_CODE: float = 0.40
     WEIGHT_ORM: float = 0.25
@@ -68,6 +74,12 @@ class Config:
     DATA_DIR = settings.DATA_DIR
     DOCKER_DATA_DIR = settings.DOCKER_DATA_DIR
     LANGGRAPH_ENABLED = settings.LANGGRAPH_ENABLED
+    RUNTIME_IDENTITY_V2 = settings.RUNTIME_IDENTITY_V2
+    STREAM_EVENTS_V2 = settings.STREAM_EVENTS_V2
+    QA_REGEX_BASELINE_FIX = settings.QA_REGEX_BASELINE_FIX
+    TENANT_ID = settings.TENANT_ID
+    PROJECT_ID = settings.PROJECT_ID
+    EVAL_REPORT_DIR = settings.EVAL_REPORT_DIR
 
     WEIGHT_CODE = settings.WEIGHT_CODE
     WEIGHT_ORM = settings.WEIGHT_ORM
