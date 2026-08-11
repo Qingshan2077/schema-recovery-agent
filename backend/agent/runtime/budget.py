@@ -30,10 +30,32 @@ class BudgetReservation:
 class BudgetLedger:
     """A lock-protected ledger safe for concurrent tasks in one process."""
 
-    def __init__(self, budget: RunBudget):
+    def __init__(self, budget: RunBudget, *, initial_usage: RuntimeUsage | None = None):
         self.budget = budget
         self._usage = RuntimeUsage()
         self._lock = RLock()
+        if initial_usage is not None:
+            self.restore(initial_usage)
+
+    def restore(self, usage: RuntimeUsage) -> None:
+        """Restore persisted usage exactly once before a resumed run executes.
+
+        A restored ledger must not silently reset or add usage.  Refusing to
+        overwrite a non-empty ledger also prevents rebuilding an engine bundle
+        from double-counting work that is already active in this process.
+        """
+
+        with self._lock:
+            if self._usage != RuntimeUsage():
+                raise RuntimeError("budget usage can only be restored into an empty ledger")
+            self._assert_limit("model_calls", usage.model_calls, self.budget.max_model_calls)
+            self._assert_limit("tool_calls", usage.tool_calls, self.budget.max_tool_calls)
+            self._assert_limit("input_tokens", usage.input_tokens, self.budget.max_input_tokens)
+            self._assert_limit("output_tokens", usage.output_tokens, self.budget.max_output_tokens)
+            self._assert_limit("loop_iterations", usage.loop_iterations, self.budget.max_loop_iterations)
+            if self.budget.max_cost_usd is not None:
+                self._assert_limit("cost_usd", usage.cost_usd, self.budget.max_cost_usd)
+            self._usage = usage.model_copy(deep=True)
 
     def reserve_model(
         self,

@@ -29,6 +29,9 @@ IdKind = Literal[
     "proposal",
     "request",
     "revision",
+    "checkpoint",
+    "control",
+    "interrupt",
 ]
 
 _PREFIXES: dict[IdKind, str] = {
@@ -51,6 +54,9 @@ _PREFIXES: dict[IdKind, str] = {
     "proposal": "prop",
     "request": "req",
     "revision": "rev",
+    "checkpoint": "chk",
+    "control": "ctl",
+    "interrupt": "int",
 }
 
 

@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Thread
-from typing import Any, Protocol
+from typing import Any
 
 from backend.agent.collectors import collector_for
 from backend.agent.collectors.base import CollectorRuntime
@@ -32,21 +32,7 @@ from backend.core.status import AgentError, RunStatus
 from backend.evidence.fusion import EvidenceFusionEngine
 from backend.evidence.ledger import EvidenceLedger
 from backend.evidence.repository import EvidenceIntegrityError, SQLiteEvidenceRepository
-
-
-class RecoveryStage(Protocol):
-    """Phase 4 handoff: serializable, idempotent and cancellation-aware."""
-
-    stage_id: str
-    input_schema_version: str
-    output_schema_version: str
-
-    async def execute(
-        self,
-        state: dict[str, Any],
-        unit: WorkUnit,
-        context: dict[str, Any],
-    ) -> StageResult: ...
+from backend.workflow.contracts import StageCapabilities
 
 
 @dataclass(frozen=True)
@@ -55,6 +41,7 @@ class HybridStageDependencies:
     tool_runtime: ToolRuntime
     model_gateway: ModelGateway | None
     ledger: EvidenceLedger
+    legacy_workers: dict[str, Any] = field(default_factory=dict)
 
 
 class HybridRecoveryStage:
@@ -298,6 +285,13 @@ class Phase4RecoveryStageAdapter:
         self.stage_id = f"recovery.{worker}"
         self.input_schema_version = "3.0"
         self.output_schema_version = "3.0"
+        self.capabilities = StageCapabilities(
+            retry_safe=True,
+            cancellable=True,
+            interruptible=worker == "merge",
+            parallel_safe=worker in {"column", "name", "code", "orm"},
+            max_concurrency=8 if worker in {"column", "name", "code", "orm"} else 1,
+        )
         self.stage = HybridRecoveryStage(worker, dependencies)
 
     async def execute(
@@ -306,23 +300,102 @@ class Phase4RecoveryStageAdapter:
         unit: WorkUnit,
         context: dict[str, Any],
     ) -> StageResult:
-        stage_context = {**state, **context}
+        if (state.get("cancellation") or {}).get("requested"):
+            return StageResult(
+                stage_id=self.stage_id,
+                status=RunStatus.CANCELLED,
+                state_patch={},
+                error=AgentError(
+                    code="run_cancelled", category="cancelled",
+                    message=str((state.get("cancellation") or {}).get("reason") or "cancelled"),
+                    source=self.worker,
+                ),
+            )
+        usage_before = self.stage.dependencies.run_context.budget.snapshot()
+        hydrated: dict[str, Any] = {}
+        for key, artifact_id in dict(state.get("output_refs") or {}).items():
+            content = self.stage.dependencies.ledger.read_artifact(artifact_id)
+            if content is not None:
+                hydrated[key] = content
+        stage_context = {**state, **hydrated, **context}
+        if self.worker == "survey" and not stage_context.get("_survey_collector_output"):
+            legacy = self.stage.dependencies.legacy_workers.get("survey")
+            if legacy is None:
+                raise RuntimeError("survey bootstrap requires the registered deterministic collector")
+            baseline = legacy.run(stage_context)
+            server_info = baseline.get("server_info") or {}
+            actual_snapshot = server_info.get("snapshot_id")
+            actual_fingerprint = server_info.get("database_fingerprint")
+            if not actual_snapshot or not actual_fingerprint:
+                raise RuntimeError("survey bootstrap did not produce snapshot identity")
+            stage_context["_survey_collector_output"] = baseline
+            stage_context["snapshot_id"] = actual_snapshot
+            stage_context["database_fingerprint"] = actual_fingerprint
+            unit = unit.model_copy(update={
+                "snapshot_id": actual_snapshot,
+                "database_fingerprint": actual_fingerprint,
+            })
         result = await self.stage.execute(unit, stage_context)
+        output_artifact = self.stage.dependencies.ledger.write_artifact(
+            snapshot_id=unit.snapshot_id,
+            subject_refs=unit.subject_refs,
+            content=result.output,
+            completeness=1.0 if result.status == RunStatus.SUCCESS else 0.7,
+            missing_capabilities=result.missing_capabilities,
+            tool_call_ids=result.tool_call_ids,
+            collector_version=f"stage-output:{self.worker}:3.0",
+            idempotency_key=_hash({"unit": unit.idempotency_key, "kind": "stage-output"}),
+        )
         requests = [
             item if isinstance(item, EvidenceRequest) else EvidenceRequest.model_validate(item)
             for item in result.output.get("evidence_requests", [])
         ]
+        critic = dict(result.output.get("critic_decision") or {})
+        output_key = (
+            f"{self.worker}_result"
+            if unit.requested_by is None else f"{self.worker}_result:{unit.work_unit_id}"
+        )
+        portable_patch = {
+            "output_refs": {output_key: output_artifact.artifact_id},
+            "snapshot_id": result.snapshot_id,
+            "database_fingerprint": unit.database_fingerprint,
+        }
+        if self.worker == "merge":
+            portable_patch["critic_action"] = critic.get("action", "accept")
+            portable_patch["critic_summary"] = critic.get("summary", result.output.get("reasoning_summary", ""))
         return StageResult(
             stage_id=self.stage_id,
             status=result.status,
-            state_patch={f"{self.worker}_result": result.output},
-            artifact_ids=result.artifact_ids,
+            state_patch=portable_patch,
+            artifact_ids=result.artifact_ids + [output_artifact.artifact_id],
             evidence_ids=result.evidence_ids,
             relation_ids=result.relation_ids,
             evidence_requests=requests,
+            usage_delta=_usage_delta(
+                usage_before,
+                self.stage.dependencies.run_context.budget.snapshot(),
+            ),
             retry_classification="safe" if result.status == RunStatus.ERROR else "never",
+            idempotency_record={
+                "idempotency_key": unit.idempotency_key,
+                "output_ref": output_artifact.artifact_id,
+            },
             error=result.error,
         )
+
+    def cancel(self, reason: str) -> None:
+        self.stage.dependencies.run_context.cancellation.cancel(reason)
+
+
+def _usage_delta(before: Any, after: Any) -> dict[str, int | float | str]:
+    return {
+        "model_calls": max(0, after.model_calls - before.model_calls),
+        "tool_calls": max(0, after.tool_calls - before.tool_calls),
+        "input_tokens": max(0, after.input_tokens - before.input_tokens),
+        "output_tokens": max(0, after.output_tokens - before.output_tokens),
+        "cost_usd": str(max(0, after.cost_usd - before.cost_usd)),
+        "loop_iterations": max(0, after.loop_iterations - before.loop_iterations),
+    }
 
 
 class HybridWorkerRunner:

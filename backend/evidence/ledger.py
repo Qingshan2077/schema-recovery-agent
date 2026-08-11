@@ -71,6 +71,9 @@ class EvidenceLedger:
     def read_artifact(self, artifact_id: str) -> dict[str, Any] | None:
         return self.repository.get_artifact(artifact_id)
 
+    def get_json(self, artifact_id: str) -> dict[str, Any] | None:
+        return self.read_artifact(artifact_id)
+
 
 def _hash(value: Any) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)

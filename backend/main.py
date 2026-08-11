@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any, Iterable
@@ -16,6 +17,7 @@ from backend.agent.runtime.tracing import RunStoreEventSink
 from backend.agent.workers.dba import DBAWorker
 from backend.agent.workers.qa import QAWorker
 from backend.api.v2 import create_chat_router
+from backend.api.run_routes import create_run_router
 from backend.config import Config
 from backend.core.identity import RunIdentity
 from backend.core.legacy_ids import LegacyIdStore
@@ -31,6 +33,7 @@ from backend.schemas import (
 
 app = FastAPI(title="Schema Recovery Agent", version="1.0.0")
 app.include_router(create_chat_router(lambda: _chat_service()))
+app.include_router(create_run_router(lambda: _recovery_run_service()))
 
 
 @app.on_event("startup")
@@ -42,6 +45,29 @@ async def startup() -> None:
     app.state.tool_registry = init_mcp_tools(app.state.runtime.tool_runtime)
     app.state.run_store = RunStore()
     app.state.legacy_id_store = LegacyIdStore()
+    from backend.persistence import SQLiteEventLog, SQLiteRunRepository
+    from backend.services import RecoveryRunService, build_engine_factory, preflight_recovery_persistence
+
+    preflight_recovery_persistence()
+    app.state.recovery_run_repository = SQLiteRunRepository(Config.RECOVERY_RUN_DB_PATH)
+    app.state.recovery_event_log = SQLiteEventLog(Config.RECOVERY_RUN_DB_PATH)
+    engine_factory = build_engine_factory(
+        runtime=app.state.runtime,
+        tool_registry=app.state.tool_registry,
+        runs=app.state.recovery_run_repository,
+        events=app.state.recovery_event_log,
+    )
+    app.state.recovery_run_service = RecoveryRunService(
+        runs=app.state.recovery_run_repository,
+        events=app.state.recovery_event_log,
+        engine_factory=engine_factory,
+        workflow_version=Config.WORKFLOW_VERSION,
+        state_schema_version=Config.STATE_SCHEMA_VERSION,
+        configured_engine=Config.RECOVERY_ENGINE,
+        auto_fallback=Config.AUTO_FALLBACK_ENABLED,
+        max_fallbacks=Config.RUN_MAX_AUTO_FALLBACKS,
+        deadline_seconds=Config.RUNTIME_DEADLINE_SECONDS,
+    )
     from backend.agent.qa import QAAgent
     from backend.chat import ChatService, SQLiteChatRepository
 
@@ -64,7 +90,7 @@ async def startup() -> None:
     )
     app.state.schema_graph = None
     app.state.langgraph_error = None
-    if Config.LANGGRAPH_ENABLED:
+    if Config.RECOVERY_ENGINE in {"legacy", "shadow"} and Config.LANGGRAPH_ENABLED:
         try:
             from backend.langgraph import build_schema_recovery_graph
 
@@ -89,11 +115,22 @@ async def health() -> dict[str, Any]:
         "model_provider_mode": Config.MODEL_PROVIDER_MODE,
         "model_profiles": _runtime().profiles.public_inventory(),
         "qa_agent_v2": Config.QA_AGENT_V2,
+        "recovery_engine": Config.RECOVERY_ENGINE,
+        "workflow_version": Config.WORKFLOW_VERSION,
+        "state_schema_version": Config.STATE_SCHEMA_VERSION,
+        "checkpoint_backend": Config.CHECKPOINT_BACKEND,
+        "store_backend": Config.STORE_BACKEND,
     }
 
 
 @app.post("/api/analyze")
 async def run_analysis() -> dict[str, Any]:
+    if Config.RECOVERY_ENGINE not in {"legacy", "shadow"}:
+        state = _recovery_run_service().create_run(
+            project_id=Config.PROJECT_ID,
+            connection_id=f"{Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}",
+        )
+        return analysis_result_v1(await _recovery_run_service().execute(state.run_id))
     identity = RunIdentity.create()
     store = _run_store()
     store.start(identity, engine="langgraph" if Config.LANGGRAPH_ENABLED else "manual")
@@ -105,6 +142,16 @@ async def run_analysis() -> dict[str, Any]:
 
 @app.post("/api/analyze/stream")
 async def analyze_stream() -> StreamingResponse:
+    if Config.RECOVERY_ENGINE not in {"legacy", "shadow"}:
+        state = _recovery_run_service().create_run(
+            project_id=Config.PROJECT_ID,
+            connection_id=f"{Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}",
+        )
+        return StreamingResponse(
+            _analysis_stream_v2(state.run_id),
+            media_type="application/x-ndjson",
+            headers={"X-Run-ID": state.run_id, "X-Trace-ID": state.trace_id},
+        )
     identity = RunIdentity.create()
     _run_store().start(identity, engine="langgraph" if Config.LANGGRAPH_ENABLED else "manual")
     runtime_context = _new_runtime_context(identity, agent_id="orchestrator")
@@ -271,6 +318,52 @@ def _chat_service():
     if service is None:
         raise HTTPException(status_code=503, detail="chat_service_not_ready")
     return service
+
+
+def _recovery_run_service():
+    service = getattr(app.state, "recovery_run_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="recovery_run_service_not_ready")
+    return service
+
+
+async def _analysis_stream_v2(run_id: str):
+    service = _recovery_run_service()
+    execution = asyncio.create_task(service.execute(run_id))
+    after_sequence = 0
+    result: dict[str, Any] | None = None
+    while True:
+        events = service.get_events(run_id, after_sequence=after_sequence)
+        for event in events:
+            after_sequence = max(after_sequence, int(event.get("sequence", 0)))
+            legacy_type = _legacy_event_type(event.get("type", "heartbeat"))
+            payload = {
+                **event,
+                "type": legacy_type,
+                "event_type": event.get("type"),
+                "run_id": run_id,
+            }
+            if legacy_type == "complete":
+                result = result or await execution
+                payload["data"] = analysis_result_v1(result)
+            yield json.dumps(payload, ensure_ascii=False, default=str) + "\n"
+        if execution.done():
+            result = result or await execution
+            if not service.get_events(run_id, after_sequence=after_sequence):
+                break
+        await asyncio.sleep(0.05)
+
+
+def _legacy_event_type(event_type: str) -> str:
+    if event_type == "run.started":
+        return "started"
+    if event_type.startswith("stage."):
+        return "node_complete" if event_type == "stage.completed" else "node_started"
+    if event_type.startswith("run.") and event_type.split(".", 1)[1] in {
+        "completed", "partial", "degraded", "blocked", "failed", "canceled",
+    }:
+        return "complete"
+    return "heartbeat"
 
 
 def _analysis_stream(identity: RunIdentity, runtime_context: RunContext | None) -> Iterable[str]:
@@ -501,6 +594,12 @@ def _finish_chat(identity: RunIdentity, payload: dict[str, Any], status: RunStat
 
 @app.get("/api/v2/runs/{run_id}")
 async def get_run(run_id: str) -> dict[str, Any]:
+    recovery_service = getattr(app.state, "recovery_run_service", None)
+    if recovery_service is not None:
+        try:
+            return recovery_service.get_run(run_id)
+        except KeyError:
+            pass
     chat_service = getattr(app.state, "chat_service", None)
     if chat_service is not None:
         qa_run = chat_service.repository.get_run(run_id, owner_id="local")
@@ -519,6 +618,11 @@ async def get_run(run_id: str) -> dict[str, Any]:
 
 @app.get("/api/analyze/{session_id}")
 async def get_analysis(session_id: str) -> dict[str, Any]:
+    if session_id.startswith("run_"):
+        try:
+            return analysis_result_v1(_recovery_run_service().get_run(session_id))
+        except KeyError:
+            pass
     record = _run_store().get(session_id)
     if record:
         return record

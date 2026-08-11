@@ -245,8 +245,12 @@ class StageResult(StrictContract):
     artifact_ids: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     relation_ids: list[str] = Field(default_factory=list)
+    new_work_units: list[WorkUnit] = Field(default_factory=list)
     evidence_requests: list[EvidenceRequest] = Field(default_factory=list)
+    emitted_event_ids: list[str] = Field(default_factory=list)
+    usage_delta: dict[str, int | float | str] = Field(default_factory=dict)
     retry_classification: Literal["never", "safe", "explicit"] = "never"
+    idempotency_record: dict[str, Any] = Field(default_factory=dict)
     error: AgentError | None = None
 
 
