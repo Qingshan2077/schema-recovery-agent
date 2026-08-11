@@ -52,3 +52,4 @@ docs/
 *.md
 !README.md
 !backend/agent/prompts/**/*.md
+data/

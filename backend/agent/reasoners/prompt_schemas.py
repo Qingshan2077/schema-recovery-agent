@@ -18,7 +18,7 @@ WORKER_REASONING_SCHEMA = {
                     "validation_flags": {"type": "array", "items": {"type": "string"}}
                 },
                 "required": ["source_table", "source_columns", "target_table", "target_columns", "cardinality", "alternatives", "validation_flags"],
-                "additionalProperties": false
+                "additionalProperties": False
             }
         },
         "assumptions": {"type": "array", "items": {"type": "string"}},
@@ -37,12 +37,12 @@ WORKER_REASONING_SCHEMA = {
                     "expected_information_gain": {"type": "number", "minimum": 0, "maximum": 1}
                 },
                 "required": ["target_worker", "requested_fact", "subject_refs", "allowed_tools", "reason", "expected_information_gain"],
-                "additionalProperties": false
+                "additionalProperties": False
             }
         },
         "decision_summary": {"type": "string", "maxLength": 3000},
         "used_memory_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 100}
     },
     "required": ["candidates", "assumptions", "uncertainties", "evidence_requests", "decision_summary", "used_memory_ids"],
-    "additionalProperties": false
+    "additionalProperties": False
 }

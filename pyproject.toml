@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "schema-recovery-agent"
 version = "1.0.0"
 description = "Schema recovery agent with FastAPI, LangGraph, MCP-style tools, monitoring, and evaluation."
@@ -17,6 +17,7 @@ dependencies = [
     "sqlparse==0.5.*",
     "openai==1.*",
     "langgraph>=0.2.0",
+    "langgraph-checkpoint-sqlite>=3.1.1",
 ]
 
 [dependency-groups]
