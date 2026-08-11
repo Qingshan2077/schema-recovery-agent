@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import operator
+import asyncio
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -43,17 +44,24 @@ class LangGraphEngine:
         self.recursion_limit = recursion_limit
         self.max_concurrency = max_concurrency
         self._compiled = None
+        self._compile_lock = asyncio.Lock()
 
     def capability_check(self) -> dict[str, Any]:
         capabilities = self.persistence.capabilities()
         return capabilities.__dict__
 
-    def compile(self):
+    async def compile(self):
         if self._compiled is not None:
             return self._compiled
+        async with self._compile_lock:
+            if self._compiled is not None:
+                return self._compiled
+            return await self._compile_graph()
+
+    async def _compile_graph(self):
         from langgraph.graph import END, START, StateGraph
 
-        checkpointer, store = self.persistence.create()
+        checkpointer, store = await self.persistence.acreate()
         graph = StateGraph(GraphRuntimeState)
         graph.add_node("survey", self._survey_node)
         graph.add_node("memory_retrieve", self._memory_retrieve_node)
@@ -93,7 +101,7 @@ class LangGraphEngine:
     async def run(self, state: RecoveryStateV2, *, resume_value: dict[str, Any] | None = None) -> RecoveryStateV2:
         if state.active_engine != "langgraph":
             raise ValueError("LangGraphEngine may only execute a state assigned to langgraph")
-        graph = self.compile()
+        graph = await self.compile()
         config = checkpoint_config(
             run_id=state.run_id, thread_id=state.thread_id, project_id=state.project_id,
             workflow_version=state.workflow_version, recursion_limit=self.recursion_limit,

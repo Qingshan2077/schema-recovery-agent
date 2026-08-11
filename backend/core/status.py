@@ -30,6 +30,7 @@ TERMINAL_STATUSES = {
 }
 
 _LEGACY_STATUS_MAP = {
+    "queued": RunStatus.RUNNING,
     "success": RunStatus.SUCCESS,
     "completed": RunStatus.SUCCESS,
     "complete": RunStatus.SUCCESS,
@@ -38,6 +39,8 @@ _LEGACY_STATUS_MAP = {
     "failure": RunStatus.ERROR,
     "cancelled": RunStatus.CANCELLED,
     "canceled": RunStatus.CANCELLED,
+    "waiting_approval": RunStatus.BLOCKED,
+    "expired": RunStatus.BLOCKED,
 }
 
 _PRIORITY = {

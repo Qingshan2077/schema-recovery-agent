@@ -29,6 +29,10 @@ class WorkflowCompatibilityError(ValueError):
     pass
 
 
+class EngineExecutionIncomplete(RuntimeError):
+    """An engine returned control without pausing or reaching a terminal state."""
+
+
 class RecoveryRunService:
     def __init__(
         self,
@@ -106,23 +110,40 @@ class RecoveryRunService:
         engine = engines.get(state.active_engine)
         try:
             final = await engine.run(state, resume=state.status == "running") if state.active_engine == "manual" else await engine.run(state)
+            final = self._settled_state(run_id, final)
         except Exception as exc:
             concurrent = self.runs.get(run_id)
             if isinstance(exc, OptimisticLockError) and concurrent.status == "canceled":
                 return result_builder.build(concurrent)
-            if not self._may_fallback(state) or not _is_engine_infrastructure_failure(exc):
-                raise
-            latest = concurrent
-            safe = not self.runs.has_inflight_execution(run_id)
-            takeover = self.fallback.takeover(latest, reason=_safe_error(exc), in_flight_known_safe=safe)
-            engines, result_builder = self._bundle(takeover, rebuild=True)
-            final = await engines.get("manual").run(takeover, resume=True)
+            if self._may_fallback(concurrent) and _is_engine_infrastructure_failure(exc):
+                try:
+                    safe = not self.runs.has_inflight_execution(run_id)
+                    takeover = self.fallback.takeover(
+                        concurrent, reason=_safe_error(exc), in_flight_known_safe=safe,
+                    )
+                    engines, result_builder = self._bundle(takeover, rebuild=True)
+                    manual_final = await engines.get("manual").run(takeover, resume=True)
+                    final = self._settled_state(run_id, manual_final)
+                except Exception as fallback_error:
+                    final = self._fail_execution(
+                        run_id, fallback_error, prior_error=exc,
+                    )
+            else:
+                final = self._fail_execution(run_id, exc)
         return result_builder.build(final)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         state = self.runs.get(run_id)
         _, builder = self._bundle(state)
         return builder.build(state)
+
+    async def aclose(self) -> None:
+        """Release process-scoped engine resources owned by the composition factory."""
+
+        close = getattr(self.engine_factory, "aclose", None)
+        if close is not None:
+            await close()
+        self._engine_bundles.clear()
 
     def get_events(self, run_id: str, *, after_sequence: int = 0, limit: int = 1000) -> list[dict[str, Any]]:
         self.runs.get(run_id)
@@ -327,6 +348,89 @@ class RecoveryRunService:
     def _may_fallback(self, state: RecoveryStateV2) -> bool:
         return self.auto_fallback and state.active_engine == "langgraph" and not RecoveryStateMachine.is_terminal(state.status)
 
+    def _settled_state(
+        self, run_id: str, engine_state: RecoveryStateV2,
+    ) -> RecoveryStateV2:
+        """Use durable state as authority and reject silent queued/running returns."""
+
+        if engine_state.run_id != run_id:
+            raise EngineExecutionIncomplete("engine returned state for a different run")
+        final = self.runs.get(run_id)
+        if final.status in {"queued", "running"}:
+            raise EngineExecutionIncomplete(
+                f"{final.active_engine} engine returned while run was {final.status}"
+            )
+        return final
+
+    def _fail_execution(
+        self,
+        run_id: str,
+        error: Exception,
+        *,
+        prior_error: Exception | None = None,
+    ) -> RecoveryStateV2:
+        """Persist an engine failure so streams and later GETs observe one outcome."""
+
+        state = self.runs.get(run_id)
+        if RecoveryStateMachine.is_terminal(state.status):
+            return state
+        target_status = "blocked" if state.status == "waiting_approval" else "failed"
+        code = (
+            "engine_execution_incomplete"
+            if isinstance(error, EngineExecutionIncomplete)
+            else "engine_execution_failed"
+        )
+        failed = apply_patch(state, StatePatch(
+            status=target_status,
+            phase="finalize",
+            errors_add=[AgentError(
+                code=code,
+                category="internal",
+                message=_safe_error(error),
+                retryable=isinstance(error, EngineExecutionIncomplete),
+                source=state.active_engine,
+                details={
+                    "exception_type": type(error).__name__,
+                    **(
+                        {"prior_exception_type": type(prior_error).__name__}
+                        if prior_error is not None else {}
+                    ),
+                },
+            )],
+            expected_version=state.version,
+        ))
+        try:
+            failed = self.runs.save(failed, expected_version=state.version)
+        except OptimisticLockError:
+            current = self.runs.get(run_id)
+            if RecoveryStateMachine.is_terminal(current.status):
+                return current
+            failed = apply_patch(current, StatePatch(
+                status="blocked" if current.status == "waiting_approval" else "failed",
+                phase="finalize",
+                errors_add=failed.errors[-1:],
+                expected_version=current.version,
+            ))
+            failed = self.runs.save(failed, expected_version=current.version)
+        failed = self._record_event(
+            failed, f"run.{failed.status}", node_id="run_service",
+            payload={"reason": code, "exception_type": type(error).__name__},
+        )
+        self.runs.save_checkpoint(
+            failed,
+            checkpoint_id=stable_id(
+                "checkpoint", run_id, failed.version, f"engine-{failed.status}",
+            ),
+            metadata={
+                "reason": code,
+                "workflow_version": failed.workflow_version,
+                "state_schema_version": failed.state_schema_version,
+                "active_engine": failed.active_engine,
+                "event_sequence": failed.last_event_sequence,
+            },
+        )
+        return failed
+
     def _validate_versions(self, state: RecoveryStateV2) -> None:
         if state.workflow_version != self.workflow_version:
             raise WorkflowCompatibilityError(
@@ -395,6 +499,7 @@ def _safe_error(error: Exception) -> str:
 
 def _is_engine_infrastructure_failure(error: Exception) -> bool:
     return isinstance(error, (
+        EngineExecutionIncomplete,
         PersistenceBackendUnavailable,
         ConnectionError,
         TimeoutError,

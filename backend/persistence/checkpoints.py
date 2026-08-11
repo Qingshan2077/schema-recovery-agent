@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
+import asyncio
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -28,7 +29,8 @@ class LangGraphPersistenceFactory:
         self.sqlite_path = sqlite_path
         self.postgres_dsn = postgres_dsn
         self._resources: tuple[Any, Any] | None = None
-        self._stack = ExitStack()
+        self._stack = AsyncExitStack()
+        self._create_lock = asyncio.Lock()
 
     def capabilities(self) -> PersistenceCapabilities:
         backend = self.checkpoint_backend.casefold()
@@ -43,55 +45,78 @@ class LangGraphPersistenceFactory:
             return PersistenceCapabilities("postgres", True, True, True, True)
         raise PersistenceBackendUnavailable("configured persistent checkpoint backend is unavailable")
 
-    def create(self) -> tuple[Any, Any]:
+    def validate_dependencies(self) -> None:
+        """Validate the configured async persistence implementation without opening it."""
+
+        capabilities = self.capabilities()
+        try:
+            if capabilities.backend == "sqlite":
+                from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver  # noqa: F401
+                from langgraph.store.sqlite.aio import AsyncSqliteStore  # noqa: F401
+            else:
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # noqa: F401
+                from langgraph.store.postgres.aio import AsyncPostgresStore  # noqa: F401
+        except ImportError as exc:
+            raise PersistenceBackendUnavailable(
+                f"async {capabilities.backend} LangGraph persistence is unavailable"
+            ) from exc
+
+    async def acreate(self) -> tuple[Any, Any]:
         if self._resources is not None:
             return self._resources
+        async with self._create_lock:
+            if self._resources is not None:
+                return self._resources
+            return await self._create_resources()
+
+    async def _create_resources(self) -> tuple[Any, Any]:
         capabilities = self.capabilities()
         if capabilities.backend == "sqlite":
             try:
-                from langgraph.checkpoint.sqlite import SqliteSaver
-                from langgraph.store.sqlite import SqliteStore
+                from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+                from langgraph.store.sqlite.aio import AsyncSqliteStore
             except ImportError as exc:
                 raise PersistenceBackendUnavailable(
-                    "SQLite LangGraph persistence requires SQLite checkpointer and store packages"
+                    "SQLite LangGraph persistence requires async SQLite checkpointer and store packages"
                 ) from exc
             path = Path(self.sqlite_path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            checkpointer = self._enter(SqliteSaver.from_conn_string(str(path)))
+            checkpointer = await self._enter(AsyncSqliteSaver.from_conn_string(str(path)))
             store_path = path.with_name(f"{path.stem}-store{path.suffix}")
-            store = self._enter(SqliteStore.from_conn_string(str(store_path)))
-            self._prepare(checkpointer)
-            self._prepare(store)
+            store = await self._enter(AsyncSqliteStore.from_conn_string(str(store_path)))
+            await self._prepare(checkpointer)
+            await self._prepare(store)
             self._resources = (checkpointer, store)
             return self._resources
         try:
-            from langgraph.checkpoint.postgres import PostgresSaver
-            from langgraph.store.postgres import PostgresStore
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+            from langgraph.store.postgres.aio import AsyncPostgresStore
         except ImportError as exc:
             raise PersistenceBackendUnavailable(
-                "PostgreSQL LangGraph persistence requires the postgres checkpoint/store packages"
+                "PostgreSQL LangGraph persistence requires async postgres checkpoint/store packages"
             ) from exc
-        checkpointer = self._enter(PostgresSaver.from_conn_string(self.postgres_dsn))
-        store = self._enter(PostgresStore.from_conn_string(self.postgres_dsn))
-        self._prepare(checkpointer)
-        self._prepare(store)
+        checkpointer = await self._enter(AsyncPostgresSaver.from_conn_string(self.postgres_dsn))
+        store = await self._enter(AsyncPostgresStore.from_conn_string(self.postgres_dsn))
+        await self._prepare(checkpointer)
+        await self._prepare(store)
         self._resources = (checkpointer, store)
         return self._resources
 
-    def close(self) -> None:
-        self._stack.close()
-        self._resources = None
+    async def aclose(self) -> None:
+        async with self._create_lock:
+            await self._stack.aclose()
+            self._resources = None
 
-    def _enter(self, resource: Any) -> Any:
-        if hasattr(resource, "__enter__") and hasattr(resource, "__exit__"):
-            return self._stack.enter_context(resource)
+    async def _enter(self, resource: Any) -> Any:
+        if hasattr(resource, "__aenter__") and hasattr(resource, "__aexit__"):
+            return await self._stack.enter_async_context(resource)
         return resource
 
     @staticmethod
-    def _prepare(resource: Any) -> None:
+    async def _prepare(resource: Any) -> None:
         setup = getattr(resource, "setup", None)
         if setup is not None:
-            setup()
+            await setup()
 
 
 def checkpoint_config(*, run_id: str, thread_id: str, project_id: str, workflow_version: str, recursion_limit: int, max_concurrency: int) -> dict[str, Any]:

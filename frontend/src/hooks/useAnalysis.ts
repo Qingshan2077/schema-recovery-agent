@@ -10,6 +10,8 @@ interface UseAnalysisState {
 
 interface RunRecordResponse {
   status: string;
+  run_id?: string;
+  run_status?: string;
   result?: AnalysisResult;
 }
 
@@ -176,11 +178,16 @@ async function fetchExistingRun(runId: string): Promise<AnalysisResult> {
   const response = await fetch(`/api/v2/runs/${encodeURIComponent(runId)}`);
   if (!response.ok) throw new Error(`${ANALYSIS_ERROR_KEY}: unable to recover run ${runId}`);
   const record = (await response.json()) as RunRecordResponse;
-  if (record.result) {
-    if (record.result.run_status === "failed") {
-      throw new Error(`${record.result.error ?? ANALYSIS_ERROR_KEY} [run_id=${runId}]`);
+  const result = record.result ?? (
+    record.run_id && record.run_status
+      ? record as unknown as AnalysisResult
+      : undefined
+  );
+  if (result) {
+    if (["failed", "blocked", "canceled", "expired"].includes(result.run_status)) {
+      throw new Error(`${result.error ?? `analysis ${result.run_status}`} [run_id=${runId}]`);
     }
-    return record.result;
+    return result;
   }
   throw new Error(`${ANALYSIS_ERROR_KEY}: run ${runId} is ${record.status}`);
 }

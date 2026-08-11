@@ -22,7 +22,7 @@ from backend.persistence import LangGraphPersistenceFactory, SQLiteEventLog, SQL
 from backend.workflow import StageRegistry, WorkflowResultBuilder, schema_recovery_v2
 
 
-def preflight_recovery_persistence() -> None:
+async def preflight_recovery_persistence() -> None:
     """Fail startup before accepting runs when the selected graph backend is unusable."""
 
     if Config.RECOVERY_ENGINE not in {"langgraph_v2", "auto_v2"}:
@@ -33,14 +33,21 @@ def preflight_recovery_persistence() -> None:
         sqlite_path=Config.LANGGRAPH_CHECKPOINT_DB_PATH,
         postgres_dsn=Config.LANGGRAPH_POSTGRES_DSN,
     )
+    persistence.validate_dependencies()
     try:
-        persistence.create()
+        await persistence.acreate()
     finally:
-        persistence.close()
+        await persistence.aclose()
 
 
 def build_engine_factory(*, runtime, tool_registry, runs: SQLiteRunRepository, events: SQLiteEventLog, traces=None):
     definition = schema_recovery_v2()
+    persistence = LangGraphPersistenceFactory(
+        checkpoint_backend=Config.CHECKPOINT_BACKEND,
+        store_backend=Config.STORE_BACKEND,
+        sqlite_path=Config.LANGGRAPH_CHECKPOINT_DB_PATH,
+        postgres_dsn=Config.LANGGRAPH_POSTGRES_DSN,
+    )
 
     def factory(state):
         identity = RunIdentity(run_id=state.run_id, trace_id=state.trace_id, thread_id=state.thread_id)
@@ -93,12 +100,6 @@ def build_engine_factory(*, runtime, tool_registry, runs: SQLiteRunRepository, e
             max_concurrency=Config.WORKFLOW_MAX_CONCURRENCY,
             max_attempts=Config.WORKFLOW_MAX_STAGE_ATTEMPTS,
         )
-        persistence = LangGraphPersistenceFactory(
-            checkpoint_backend=Config.CHECKPOINT_BACKEND,
-            store_backend=Config.STORE_BACKEND,
-            sqlite_path=Config.LANGGRAPH_CHECKPOINT_DB_PATH,
-            postgres_dsn=Config.LANGGRAPH_POSTGRES_DSN,
-        )
         graph = LangGraphEngine(
             definition=definition, portable_scheduler=manual, persistence=persistence,
             recursion_limit=Config.WORKFLOW_RECURSION_LIMIT,
@@ -106,4 +107,8 @@ def build_engine_factory(*, runtime, tool_registry, runs: SQLiteRunRepository, e
         )
         return EngineRegistry({"manual": manual, "langgraph": graph}), WorkflowResultBuilder(ledger)
 
+    async def aclose() -> None:
+        await persistence.aclose()
+
+    factory.aclose = aclose  # type: ignore[attr-defined]
     return factory

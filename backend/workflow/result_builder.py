@@ -39,6 +39,7 @@ class WorkflowResultBuilder:
             "budget": state.budget.model_dump(mode="json"),
             "deadline_at": state.deadline_at.isoformat() if state.deadline_at else None,
             "errors": [item.model_dump(mode="json") for item in state.errors],
+            "error": state.errors[-1].message if state.errors else None,
             "capability_gaps": [item.model_dump(mode="json") for item in state.errors],
             "engine_history": [item.model_dump(mode="json") for item in state.engine_history],
             "steps": steps,
