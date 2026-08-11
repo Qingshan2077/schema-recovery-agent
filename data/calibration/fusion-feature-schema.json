@@ -1,0 +1,13 @@
+{
+  "version": "phase5-feature-schema-v1",
+  "features": [
+    "support_catalog", "oppose_catalog", "support_column_profile", "oppose_column_profile",
+    "support_name_semantics", "oppose_name_semantics", "support_sql_ast", "oppose_sql_ast",
+    "support_sql_llm", "oppose_sql_llm", "support_orm", "oppose_orm",
+    "support_memory", "oppose_memory", "support_human", "oppose_human",
+    "support_legacy_import", "oppose_legacy_import", "independent_root_count",
+    "support_root_count", "oppose_root_count", "non_memory_root_count", "source_diversity",
+    "synergy_multi_source", "conflict_root_count", "memory_only", "single_root"
+  ],
+  "correlation_unit": ["root_fact_id", "correlation_group", "polarity"]
+}

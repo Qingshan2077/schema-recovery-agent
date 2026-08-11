@@ -42,6 +42,8 @@ class HybridStageDependencies:
     model_gateway: ModelGateway | None
     ledger: EvidenceLedger
     legacy_workers: dict[str, Any] = field(default_factory=dict)
+    memory_service: Any | None = None
+    versioned_evidence_repository: Any | None = None
 
 
 class HybridRecoveryStage:
@@ -106,6 +108,7 @@ class HybridRecoveryStage:
                 collector_summary=collected.content,
                 context=runtime_context,
                 deterministic=deterministic,
+                memory_context=context.get("memory_context"),
             )
             model_call_ids.extend(proposal.model_call_ids)
             uncertainties.extend(proposal.uncertainties)
@@ -248,7 +251,10 @@ class HybridRecoveryStage:
         if self.worker == "survey":
             return dict(legacy_output)
         if self.worker == "merge":
-            return _merge_output(context, unit)
+            return _merge_output(
+                context, unit,
+                versioned_repository=self.dependencies.versioned_evidence_repository,
+            )
         relations = [_candidate_output(item, artifact_id) for item in accepted]
         base: dict[str, Any] = {
             "relations": relations,
@@ -315,6 +321,8 @@ class Phase4RecoveryStageAdapter:
         hydrated: dict[str, Any] = {}
         for key, artifact_id in dict(state.get("output_refs") or {}).items():
             content = self.stage.dependencies.ledger.read_artifact(artifact_id)
+            if content is None and key == "memory_context" and self.stage.dependencies.memory_service:
+                content = self.stage.dependencies.memory_service.get_context_package(artifact_id).model_dump(mode="json")
             if content is not None:
                 hydrated[key] = content
         stage_context = {**state, **hydrated, **context}
@@ -528,7 +536,9 @@ def configured_worker_mode(worker_id: str) -> WorkerMode:
     return normalize_worker_mode(getattr(Config, f"WORKER_IMPL_{worker_id.upper()}", "legacy"))
 
 
-def _merge_output(context: dict[str, Any], unit: WorkUnit) -> dict[str, Any]:
+def _merge_output(
+    context: dict[str, Any], unit: WorkUnit, *, versioned_repository: Any | None = None,
+) -> dict[str, Any]:
     raw_candidates = [RelationCandidate.model_validate(item) for item in context.get("_ledger_relations", [])]
     evidence_by_id = {
         item["evidence_id"]: item for item in context.get("_ledger_evidence", [])
@@ -587,7 +597,14 @@ def _merge_output(context: dict[str, Any], unit: WorkUnit) -> dict[str, Any]:
         ]
         from backend.agent.runtime.hybrid_contracts import EvidenceItem
 
-        fused = engine.fuse(candidate, [EvidenceItem.model_validate(item) for item in scoped])
+        legacy_evidence = [EvidenceItem.model_validate(item) for item in scoped]
+        if Config.FUSION_V2_ENABLED:
+            fused = _fuse_versioned(
+                candidate, legacy_evidence, context=context, unit=unit,
+                repository=versioned_repository,
+            )
+        else:
+            fused = engine.fuse(candidate, legacy_evidence)
         relation = _candidate_output(candidate, None)
         relation.update({
             "fused_confidence": fused.probability,
@@ -616,6 +633,89 @@ def _merge_output(context: dict[str, Any], unit: WorkUnit) -> dict[str, Any]:
 
         output["critic_decision"] = RecoveryCritic().review(output, unit).model_dump(mode="json")
     return output
+
+
+def _fuse_versioned(
+    candidate: RelationCandidate,
+    evidence: list[Any],
+    *,
+    context: dict[str, Any],
+    unit: WorkUnit,
+    repository: Any | None,
+) -> Any:
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from backend.evidence.bridge import namespace_from_context, relation_template, upgrade_evidence
+    from backend.evidence.contracts import ThresholdPolicy
+    from backend.evidence.fusion import VersionedFusionEngine
+
+    namespace = namespace_from_context(context, unit.snapshot_id, unit.run_id)
+    upgraded = [
+        upgrade_evidence(item, namespace=namespace, run_id=unit.run_id)
+        for item in evidence
+    ]
+    feature_hash = "phase5-feature-schema-v1"
+    thresholds = ThresholdPolicy(version="phase5-threshold-v1", high=0.70, medium=0.40)
+    existing = None
+    if repository is not None:
+        try:
+            existing = repository.get_relation(candidate.relation_id)
+        except KeyError:
+            existing = None
+    relation_version = 1 if existing is None else existing.version + 1
+    fusion = VersionedFusionEngine(
+        fusion_version="log_odds_v3",
+        feature_schema_hash=feature_hash,
+        threshold_policy=thresholds,
+    ).fuse(
+        relation_template(
+            candidate, namespace=namespace, run_id=unit.run_id,
+            feature_schema_hash=feature_hash,
+        ),
+        upgraded,
+        version=relation_version,
+        run_id=unit.run_id,
+        now=datetime.now(timezone.utc),
+    )
+    if fusion.relation.confidence_band == "high":
+        fusion = fusion.model_copy(update={
+            "relation": fusion.relation.model_copy(update={"status": "accepted"}),
+        })
+    if repository is not None:
+        for item in upgraded:
+            repository.append_evidence(item)
+        if existing is not None and existing.created_by_run_id == unit.run_id:
+            fusion = fusion.model_copy(update={"relation": existing})
+        else:
+            repository.append_relation_version(fusion.relation)
+    breakdown = {
+        "model_version": fusion.relation.fusion_version,
+        "weight_version": fusion.relation.feature_schema_hash,
+        "prior_probability": 0.18,
+        "prior_log_odds": 0.0,
+        "contributions": [item.model_dump(mode="json") for item in fusion.relation.contribution_breakdown],
+        "hard_constraint_adjustment": sum(
+            item.log_odds_delta for item in fusion.relation.contribution_breakdown
+            if item.feature == "hard_constraint_violation"
+        ),
+        "conflict_adjustment": sum(
+            item.log_odds_delta for item in fusion.relation.contribution_breakdown
+            if item.feature == "conflict_root_count"
+        ),
+        "final_log_odds": fusion.relation.raw_score,
+        "probability": fusion.relation.calibrated_probability,
+        "band": fusion.relation.confidence_band,
+        "calibration_version": fusion.relation.calibration_version,
+        "threshold_policy_version": fusion.relation.threshold_policy_version,
+        "independent_root_fact_ids": fusion.independent_root_fact_ids,
+        "excluded_evidence_ids": fusion.excluded_evidence_ids,
+    }
+    return SimpleNamespace(
+        probability=fusion.relation.calibrated_probability,
+        band=fusion.relation.confidence_band,
+        breakdown=SimpleNamespace(model_dump=lambda **_: breakdown),
+    )
 
 
 def _candidate_output(candidate: RelationCandidate, artifact_id: str | None) -> dict[str, Any]:

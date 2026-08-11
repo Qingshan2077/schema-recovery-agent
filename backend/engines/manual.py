@@ -11,6 +11,7 @@ from typing import Any
 from backend.agent.critics import EvidenceRequestPolicy
 from backend.agent.runtime.hybrid_contracts import BudgetSlice, EvidenceRequest, StageResult, WorkUnit
 from backend.agent.runtime.contracts import RuntimeUsage
+from backend.agent.memory.stage import stage_id_for_worker
 from backend.core.identity import new_id, stable_id
 from backend.core.status import AgentError, RunStatus
 from backend.persistence.event_log import SQLiteEventLog
@@ -97,6 +98,10 @@ class ManualEngine:
             if self._must_stop(state):
                 return self._finish_stopped(state)
 
+        if self.stages.has("memory.retrieve") and not self._completed_worker(state, "memory_retrieve"):
+            memory_retrieve = self._work_unit(state, "memory_retrieve", evidence_round=0)
+            state, _ = await self._run_one_and_apply(state, memory_retrieve, phase="memory_retrieve")
+
         resumed_frontier = [
             unit for unit in state.pending_work_units
             if not self._completed_unit(state, unit.work_unit_id)
@@ -119,6 +124,10 @@ class ManualEngine:
             if self._must_stop(state):
                 return self._finish_stopped(state)
 
+        if self.stages.has("memory.verify") and not self._completed_worker(state, "memory_verify"):
+            memory_verify = self._work_unit(state, "memory_verify", evidence_round=state.evidence_round)
+            state, _ = await self._run_one_and_apply(state, memory_verify, phase="memory_verify")
+
         approval_resolved = any(key.startswith("approval:") for key in state.output_refs)
         while not (approval_resolved and state.output_refs.get("merge_result")):
             merge = self._work_unit(state, "merge", evidence_round=state.evidence_round)
@@ -140,6 +149,13 @@ class ManualEngine:
                 return self._finish_stopped(state)
 
         result_ref = state.output_refs.get("merge_result")
+        if self.stages.has("memory.consolidate") and not self._completed_worker(state, "memory_consolidate"):
+            memory_consolidate = self._work_unit(
+                state, "memory_consolidate", evidence_round=state.evidence_round,
+            )
+            state, _ = await self._run_one_and_apply(
+                state, memory_consolidate, phase="memory_consolidate",
+            )
         has_result = bool(result_ref)
         required_failed = any(error.source in {"survey", "column", "name", "code", "merge"} for error in state.errors)
         optional_failed = any(error.source == "orm" for error in state.errors)
@@ -229,7 +245,7 @@ class ManualEngine:
         stage_semaphores: dict[str, asyncio.Semaphore] = {}
 
         async def execute(unit: WorkUnit) -> tuple[WorkUnit, StageResult]:
-            stage = self.stages.get(f"recovery.{unit.worker}")
+            stage = self.stages.get(stage_id_for_worker(unit.worker))
             stage_semaphore = stage_semaphores.setdefault(
                 stage.stage_id,
                 asyncio.Semaphore(min(self.max_concurrency, stage.capabilities.max_concurrency)),
@@ -260,7 +276,7 @@ class ManualEngine:
         return self._checkpoint(state, reason=f"stage:{unit.worker}"), result
 
     async def _execute_stage(self, state: RecoveryStateV2, unit: WorkUnit, *, execution_engine: str = "manual") -> StageResult:
-        stage_id = f"recovery.{unit.worker}"
+        stage_id = stage_id_for_worker(unit.worker)
         stage = self.stages.get(stage_id)
         stage_key = f"{stage_id}:{unit.work_unit_id}"
         input_hash = _hash({
@@ -339,6 +355,13 @@ class ManualEngine:
         self.runs.complete_execution(completed)
         event_type = "stage.completed" if result.status in {RunStatus.SUCCESS, RunStatus.DEGRADED, RunStatus.PARTIAL} else "stage.failed"
         self.events.append(state, event_type, status=result.status.value, node_id=stage_id, payload={"work_unit_id": unit.work_unit_id, "output_ref": output_ref}, attempt=attempt)
+        for domain_event in result.domain_events:
+            event_payload = dict(domain_event)
+            event_name = str(event_payload.pop("type", "memory.event"))
+            self.events.append(
+                state, event_name, status=result.status.value, node_id=stage_id,
+                payload=event_payload, attempt=attempt,
+            )
         return result
 
     async def _invoke_stage(
@@ -376,7 +399,7 @@ class ManualEngine:
     def _patch_for_result(self, state: RecoveryStateV2, unit: WorkUnit, result: StageResult, phase: str) -> StatePatch:
         raw = result.state_patch
         errors = [result.error] if result.error else []
-        stage_key = f"recovery.{unit.worker}:{unit.work_unit_id}:{result.status.value}"
+        stage_key = f"{stage_id_for_worker(unit.worker)}:{unit.work_unit_id}:{result.status.value}"
         status = None
         if unit.worker in {"survey", "column", "name", "code", "merge"}:
             if result.status == RunStatus.BLOCKED:
@@ -399,7 +422,7 @@ class ManualEngine:
             output_refs_merge=dict(raw.get("output_refs") or {}),
             usage_delta=RuntimeUsage.model_validate(result.usage_delta),
             attempts_merge={
-                f"recovery.{unit.worker}:{unit.work_unit_id}": int(
+                f"{stage_id_for_worker(unit.worker)}:{unit.work_unit_id}": int(
                     result.idempotency_record.get("attempt_count", 1)
                 )
             },
@@ -448,7 +471,7 @@ class ManualEngine:
         ))
 
     def _completed_worker(self, state: RecoveryStateV2, worker: str) -> bool:
-        return any(key.startswith(f"recovery.{worker}:") for key in state.completed_stage_keys)
+        return any(key.startswith(f"{stage_id_for_worker(worker)}:") for key in state.completed_stage_keys)
 
     @staticmethod
     def _completed_unit(state: RecoveryStateV2, work_unit_id: str) -> bool:

@@ -56,30 +56,36 @@ class LangGraphEngine:
         checkpointer, store = self.persistence.create()
         graph = StateGraph(GraphRuntimeState)
         graph.add_node("survey", self._survey_node)
+        graph.add_node("memory_retrieve", self._memory_retrieve_node)
         graph.add_node("plan_work", self._plan_node)
         graph.add_node("execute_unit", self._execute_unit_node)
         graph.add_node("validate_join", self._join_node)
+        graph.add_node("memory_verify", self._memory_verify_node)
         graph.add_node("merge", self._merge_node)
         graph.add_node("critic", self._critic_node)
         graph.add_node("human_interrupt", self._interrupt_node)
+        graph.add_node("memory_consolidate", self._memory_consolidate_node)
         graph.add_node("finalize", self._finalize_node)
         graph.add_edge(START, "survey")
         graph.add_conditional_edges(
             "survey", self._continue_route,
-            {"continue": "plan_work", "finalize": "finalize"},
+            {"continue": "memory_retrieve", "finalize": "finalize"},
         )
+        graph.add_edge("memory_retrieve", "plan_work")
         graph.add_conditional_edges("plan_work", self._fanout_route, ["execute_unit"])
         graph.add_edge("execute_unit", "validate_join")
         graph.add_conditional_edges(
             "validate_join", self._continue_route,
-            {"continue": "merge", "finalize": "finalize"},
+            {"continue": "memory_verify", "finalize": "finalize"},
         )
+        graph.add_edge("memory_verify", "merge")
         graph.add_edge("merge", "critic")
         graph.add_conditional_edges(
             "critic", self._critic_route,
-            {"fanout": "plan_work", "interrupt": "human_interrupt", "finalize": "finalize"},
+            {"fanout": "plan_work", "interrupt": "human_interrupt", "finalize": "memory_consolidate"},
         )
-        graph.add_edge("human_interrupt", "finalize")
+        graph.add_edge("human_interrupt", "memory_consolidate")
+        graph.add_edge("memory_consolidate", "finalize")
         graph.add_edge("finalize", END)
         self._compiled = graph.compile(checkpointer=checkpointer, store=store)
         return self._compiled
@@ -115,6 +121,16 @@ class LangGraphEngine:
             return {"portable_state": state.model_dump(mode="json")}
         unit = self.portable._work_unit(state, "survey", evidence_round=0)
         state, _ = await self.portable._run_one_and_apply(state, unit, phase="survey", execution_engine="langgraph")
+        return {"portable_state": state.model_dump(mode="json")}
+
+    async def _memory_retrieve_node(self, graph_state: GraphRuntimeState) -> dict[str, Any]:
+        state = RecoveryStateV2.model_validate(graph_state["portable_state"])
+        if not self.portable.stages.has("memory.retrieve"):
+            return {"portable_state": state.model_dump(mode="json")}
+        unit = self.portable._work_unit(state, "memory_retrieve", evidence_round=0)
+        state, _ = await self.portable._run_one_and_apply(
+            state, unit, phase="memory_retrieve", execution_engine="langgraph",
+        )
         return {"portable_state": state.model_dump(mode="json")}
 
     def _plan_node(self, graph_state: GraphRuntimeState) -> dict[str, Any]:
@@ -167,6 +183,16 @@ class LangGraphEngine:
             state = self.portable._commit(state, merge_patches(patches).model_copy(update={"expected_version": state.version}))
             state = self.portable._checkpoint(state, reason="langgraph:validate_join")
         state = self.portable._event(state, "join.completed", node_id="validate_join")
+        return {"portable_state": state.model_dump(mode="json")}
+
+    async def _memory_verify_node(self, graph_state: GraphRuntimeState) -> dict[str, Any]:
+        state = RecoveryStateV2.model_validate(graph_state["portable_state"])
+        if not self.portable.stages.has("memory.verify"):
+            return {"portable_state": state.model_dump(mode="json")}
+        unit = self.portable._work_unit(state, "memory_verify", evidence_round=state.evidence_round)
+        state, _ = await self.portable._run_one_and_apply(
+            state, unit, phase="memory_verify", execution_engine="langgraph",
+        )
         return {"portable_state": state.model_dump(mode="json")}
 
     async def _merge_node(self, graph_state: GraphRuntimeState) -> dict[str, Any]:
@@ -256,6 +282,18 @@ class LangGraphEngine:
         state = self.portable._event(state, "approval.resolved", node_id="human_interrupt", payload={"interrupt_id": interrupt_ref.interrupt_id})
         state = self.portable._event(state, "run.resumed", node_id="human_interrupt")
         return {"route": "finalize", "portable_state": state.model_dump(mode="json"), "resume_decision": decision}
+
+    async def _memory_consolidate_node(self, graph_state: GraphRuntimeState) -> dict[str, Any]:
+        state = RecoveryStateV2.model_validate(graph_state["portable_state"])
+        if not self.portable.stages.has("memory.consolidate"):
+            return {"portable_state": state.model_dump(mode="json")}
+        unit = self.portable._work_unit(
+            state, "memory_consolidate", evidence_round=state.evidence_round,
+        )
+        state, _ = await self.portable._run_one_and_apply(
+            state, unit, phase="memory_consolidate", execution_engine="langgraph",
+        )
+        return {"portable_state": state.model_dump(mode="json")}
 
     def _finalize_node(self, graph_state: GraphRuntimeState) -> dict[str, Any]:
         state = RecoveryStateV2.model_validate(graph_state["portable_state"])

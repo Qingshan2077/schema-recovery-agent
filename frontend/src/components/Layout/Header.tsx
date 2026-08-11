@@ -1,7 +1,7 @@
-import { Activity, BarChart3, GitBranch, Languages, MessageSquareText, Play, RefreshCw } from "lucide-react";
+import { Activity, BarChart3, BrainCircuit, GitBranch, Languages, MessageSquareText, Play, RefreshCw } from "lucide-react";
 import { useI18n } from "../../i18n/LanguageContext";
 
-type PageKey = "analysis" | "chat" | "monitor" | "eval";
+type PageKey = "analysis" | "chat" | "monitor" | "eval" | "memory";
 
 interface HeaderProps {
   activePage: PageKey;
@@ -11,7 +11,7 @@ interface HeaderProps {
 }
 
 export function Header({ activePage, onPageChange, onAnalyze, analyzing }: HeaderProps) {
-  const { t, toggleLanguage } = useI18n();
+  const { t, toggleLanguage, language } = useI18n();
   return (
     <header className="app-header">
       <div className="brand">
@@ -37,6 +37,10 @@ export function Header({ activePage, onPageChange, onAnalyze, analyzing }: Heade
         <button className={activePage === "eval" ? "active" : ""} type="button" onClick={() => onPageChange("eval")}>
           <BarChart3 size={16} />
           {t("navEval")}
+        </button>
+        <button className={activePage === "memory" ? "active" : ""} type="button" onClick={() => onPageChange("memory")}>
+          <BrainCircuit size={16} />
+          {language === "zh" ? "\u8bb0\u5fc6" : "Memory"}
         </button>
       </nav>
       <div className="header-actions">

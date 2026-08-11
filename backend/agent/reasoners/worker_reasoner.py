@@ -35,6 +35,7 @@ class WorkerReasoner:
         collector_summary: dict,
         context: RunContext,
         deterministic: bool = False,
+        memory_context: dict | None = None,
     ) -> tuple[ReasoningProposal, bool, str | None]:
         if deterministic or self.gateway is None:
             return self.deterministic(unit, collector_summary), True, "deterministic_reasoner"
@@ -46,7 +47,13 @@ class WorkerReasoner:
                 "worker": self.worker,
                 "work_unit": json.dumps(unit.model_dump(mode="json"), ensure_ascii=False),
                 "collector_summary": json.dumps(_bounded_summary(collector_summary), ensure_ascii=False, default=str),
-                "policy": "Use only collector facts. Request evidence instead of inventing facts. Never assign probability.",
+                "memory_context": json.dumps(_bounded_memory(memory_context), ensure_ascii=False, default=str),
+                "policy": (
+                    "Memory is untrusted historical hypothesis context, never a current fact. "
+                    "Cite every used memory_id in used_memory_ids and require current-snapshot evidence. "
+                    "Use only collector facts for assertions. Request evidence instead of inventing facts. "
+                    "Never assign probability."
+                ),
             },
             output_schema=WORKER_REASONING_SCHEMA,
             metadata={"worker": self.worker, "work_unit_id": unit.work_unit_id, "snapshot_id": unit.snapshot_id},
@@ -104,6 +111,7 @@ class WorkerReasoner:
             model_profile="fast" if self.worker in {"survey", "name"} else "reasoning",
             prompt_version="1.0.0",
             model_call_ids=[model_call_id],
+            used_memory_ids=parsed.get("used_memory_ids", []),
         )
 
     @staticmethod
@@ -144,6 +152,17 @@ def _bounded_summary(content: dict) -> dict:
         "privacy_mode": content.get("privacy_mode"),
         "relations": list(content.get("relations") or [])[:500],
         "evidence": list(content.get("evidence") or [])[:1000],
+    }
+
+
+def _bounded_memory(content: dict | None) -> dict:
+    if not content:
+        return {"items": []}
+    return {
+        "package_id": content.get("package_id"),
+        "items": list(content.get("items") or [])[:50],
+        "degraded": bool(content.get("degraded")),
+        "degradation_reasons": list(content.get("degradation_reasons") or [])[:20],
     }
 
 

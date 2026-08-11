@@ -27,8 +27,14 @@ class StageRegistry:
         except KeyError as exc:
             raise StageRegistryError(f"stage is not registered: {stage_id}") from exc
 
+    def has(self, stage_id: str) -> bool:
+        return stage_id in self._stages
+
     def validate_definition(self, definition: WorkflowDefinition) -> None:
-        missing = sorted({node.stage_id for node in definition.nodes if node.stage_id and node.stage_id not in self._stages})
+        missing = sorted({
+            node.stage_id for node in definition.nodes
+            if node.stage_id and node.required and node.stage_id not in self._stages
+        })
         if missing:
             raise StageRegistryError(f"workflow has missing stages: {', '.join(missing)}")
 

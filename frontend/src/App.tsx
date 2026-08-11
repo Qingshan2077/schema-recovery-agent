@@ -7,9 +7,10 @@ import { AnalysisPage } from "./pages/AnalysisPage";
 import { ChatPage } from "./pages/ChatPage";
 import { EvalPage } from "./pages/EvalPage";
 import { MonitorPage } from "./pages/MonitorPage";
+import { MemoryInspectorPage } from "./pages/MemoryInspectorPage";
 import type { SurveyOutput } from "./types/api";
 
-export type PageKey = "analysis" | "chat" | "monitor" | "eval";
+export type PageKey = "analysis" | "chat" | "monitor" | "eval" | "memory";
 
 function getInitialLanguage(): Language {
   const stored = localStorage.getItem("schema-agent-language");
@@ -67,6 +68,7 @@ export default function App() {
             {activePage === "chat" ? <ChatPage /> : null}
             {activePage === "monitor" ? <MonitorPage /> : null}
             {activePage === "eval" ? <EvalPage /> : null}
+            {activePage === "memory" ? <MemoryInspectorPage /> : null}
           </main>
         </div>
       </div>

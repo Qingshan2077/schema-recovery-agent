@@ -32,6 +32,13 @@ IdKind = Literal[
     "checkpoint",
     "control",
     "interrupt",
+    "memory",
+    "promotion",
+    "feedback",
+    "retrieval",
+    "verification",
+    "fusion",
+    "calibration",
 ]
 
 _PREFIXES: dict[IdKind, str] = {
@@ -57,6 +64,13 @@ _PREFIXES: dict[IdKind, str] = {
     "checkpoint": "chk",
     "control": "ctl",
     "interrupt": "int",
+    "memory": "mem",
+    "promotion": "promo",
+    "feedback": "fbk",
+    "retrieval": "ret",
+    "verification": "ver",
+    "fusion": "fus",
+    "calibration": "cal",
 }
 
 

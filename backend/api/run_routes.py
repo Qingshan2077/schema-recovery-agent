@@ -12,6 +12,9 @@ class RunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project_id: str = "default"
     connection_id: str = "default"
+    tenant_id: str = "default"
+    database_name: str = "default"
+    schema_name: str = "default"
     thread_id: str | None = None
     session_id: str | None = None
     engine: str | None = None
@@ -44,6 +47,8 @@ def create_run_router(service_provider: Callable[[], Any]) -> APIRouter:
             service = service_provider()
             state = service.create_run(
                 project_id=request.project_id, connection_id=request.connection_id,
+                tenant_id=request.tenant_id, database_name=request.database_name,
+                schema_name=request.schema_name,
                 thread_id=request.thread_id, session_id=request.session_id, engine=request.engine,
             )
             return await service.execute(state.run_id) if request.execute else service.get_run(state.run_id)

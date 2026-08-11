@@ -1,0 +1,15 @@
+{
+  "fusion_version": "log_odds_v3",
+  "feature_schema_hash": "phase5-feature-schema-v1",
+  "threshold_policy": {
+    "version": "phase5-threshold-v1",
+    "high": 0.70,
+    "medium": 0.40,
+    "memory_only_high_forbidden": true,
+    "single_root_high_forbidden": true
+  },
+  "calibration": {
+    "version": "identity-v1",
+    "online_training_forbidden": true
+  }
+}

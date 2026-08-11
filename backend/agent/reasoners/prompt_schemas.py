@@ -40,8 +40,9 @@ WORKER_REASONING_SCHEMA = {
                 "additionalProperties": false
             }
         },
-        "decision_summary": {"type": "string", "maxLength": 3000}
+        "decision_summary": {"type": "string", "maxLength": 3000},
+        "used_memory_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 100}
     },
-    "required": ["candidates", "assumptions", "uncertainties", "evidence_requests", "decision_summary"],
+    "required": ["candidates", "assumptions", "uncertainties", "evidence_requests", "decision_summary", "used_memory_ids"],
     "additionalProperties": false
 }

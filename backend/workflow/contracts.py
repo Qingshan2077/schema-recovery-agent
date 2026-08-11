@@ -55,6 +55,9 @@ class RecoveryStateV2(StrictContract):
     session_id: str
     project_id: str
     connection_id: str
+    tenant_id: str = "default"
+    database_name: str = "default"
+    schema_name: str = "default"
     snapshot_id: str | None = None
     database_fingerprint: str | None = None
     active_engine: EngineName

@@ -9,7 +9,10 @@ from pydantic import Field, field_validator, model_validator
 from backend.agent.runtime.contracts import StrictContract
 from backend.core.status import AgentError, RunStatus
 
-WorkerKind = Literal["survey", "column", "name", "code", "orm", "merge"]
+WorkerKind = Literal[
+    "survey", "column", "name", "code", "orm", "merge",
+    "memory_retrieve", "memory_verify", "memory_consolidate",
+]
 WorkerMode = Literal["legacy", "hybrid", "shadow", "deterministic"]
 
 
@@ -125,6 +128,7 @@ class ReasoningProposal(StrictContract):
     model_profile: str
     prompt_version: str
     model_call_ids: list[str] = Field(default_factory=list)
+    used_memory_ids: list[str] = Field(default_factory=list)
 
 
 class EvidenceItem(StrictContract):
@@ -248,6 +252,7 @@ class StageResult(StrictContract):
     new_work_units: list[WorkUnit] = Field(default_factory=list)
     evidence_requests: list[EvidenceRequest] = Field(default_factory=list)
     emitted_event_ids: list[str] = Field(default_factory=list)
+    domain_events: list[dict[str, Any]] = Field(default_factory=list)
     usage_delta: dict[str, int | float | str] = Field(default_factory=dict)
     retry_classification: Literal["never", "safe", "explicit"] = "never"
     idempotency_record: dict[str, Any] = Field(default_factory=dict)

@@ -18,6 +18,8 @@ from backend.agent.workers.dba import DBAWorker
 from backend.agent.workers.qa import QAWorker
 from backend.api.v2 import create_chat_router
 from backend.api.run_routes import create_run_router
+from backend.api.memory_routes import create_memory_router
+from backend.api.evidence_routes import create_evidence_router
 from backend.config import Config
 from backend.core.identity import RunIdentity
 from backend.core.legacy_ids import LegacyIdStore
@@ -34,17 +36,27 @@ from backend.schemas import (
 app = FastAPI(title="Schema Recovery Agent", version="1.0.0")
 app.include_router(create_chat_router(lambda: _chat_service()))
 app.include_router(create_run_router(lambda: _recovery_run_service()))
+app.include_router(create_memory_router(lambda: _memory_service()))
+app.include_router(create_evidence_router(lambda: _versioned_evidence_repository()))
 
 
 @app.on_event("startup")
 async def startup() -> None:
     from backend.agent.memory.global_memory import GlobalMemory
+    from backend.agent.memory.service import MemoryService
+    from backend.evidence.versioned_repository import SQLiteVersionedEvidenceRepository
     from backend.mcp.server import init_mcp_tools
 
     app.state.runtime = build_runtime_container(Config)
     app.state.tool_registry = init_mcp_tools(app.state.runtime.tool_runtime)
     app.state.run_store = RunStore()
     app.state.legacy_id_store = LegacyIdStore()
+    app.state.memory_service = MemoryService(
+        Config.MEMORY_V2_DB_PATH, vector_enabled=Config.MEMORY_VECTOR_ENABLED,
+    )
+    app.state.versioned_evidence_repository = SQLiteVersionedEvidenceRepository(
+        Config.EVIDENCE_DB_PATH,
+    )
     from backend.persistence import SQLiteEventLog, SQLiteRunRepository
     from backend.services import RecoveryRunService, build_engine_factory, preflight_recovery_persistence
 
@@ -129,6 +141,9 @@ async def run_analysis() -> dict[str, Any]:
         state = _recovery_run_service().create_run(
             project_id=Config.PROJECT_ID,
             connection_id=f"{Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}",
+            tenant_id=Config.TENANT_ID,
+            database_name=Config.DB_NAME,
+            schema_name=Config.DB_NAME,
         )
         return analysis_result_v1(await _recovery_run_service().execute(state.run_id))
     identity = RunIdentity.create()
@@ -146,6 +161,9 @@ async def analyze_stream() -> StreamingResponse:
         state = _recovery_run_service().create_run(
             project_id=Config.PROJECT_ID,
             connection_id=f"{Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}",
+            tenant_id=Config.TENANT_ID,
+            database_name=Config.DB_NAME,
+            schema_name=Config.DB_NAME,
         )
         return StreamingResponse(
             _analysis_stream_v2(state.run_id),
@@ -325,6 +343,20 @@ def _recovery_run_service():
     if service is None:
         raise HTTPException(status_code=503, detail="recovery_run_service_not_ready")
     return service
+
+
+def _memory_service():
+    service = getattr(app.state, "memory_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="memory_service_not_ready")
+    return service
+
+
+def _versioned_evidence_repository():
+    repository = getattr(app.state, "versioned_evidence_repository", None)
+    if repository is None:
+        raise HTTPException(status_code=503, detail="evidence_repository_not_ready")
+    return repository
 
 
 async def _analysis_stream_v2(run_id: str):

@@ -984,3 +984,14 @@ button { font: inherit; }
     grid-template-columns: 1fr;
   }
 }
+.memory-inspector { position: relative; min-height: 100%; }
+.memory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.memory-card { display: flex; align-items: center; gap: 12px; padding: 14px; text-align: left; color: inherit; background: var(--panel, #fff); border: 1px solid var(--border, #dfe3e8); border-radius: 10px; cursor: pointer; }
+.memory-card:hover { border-color: #6d5dfc; }
+.memory-card-main { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.memory-card-main strong, .memory-card-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-drawer { position: fixed; z-index: 20; top: 76px; right: 0; bottom: 0; width: min(520px, 90vw); padding: 24px; overflow: auto; background: var(--panel, #fff); border-left: 1px solid var(--border, #dfe3e8); box-shadow: -12px 0 30px rgba(0, 0, 0, .12); }
+.memory-drawer .icon-button { float: right; }
+.memory-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.memory-meta span { padding: 3px 8px; border-radius: 999px; background: #eef0ff; color: #4234b7; }
+.empty-panel { padding: 32px; color: #667085; border: 1px dashed #cfd4dc; border-radius: 10px; }

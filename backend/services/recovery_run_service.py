@@ -59,6 +59,9 @@ class RecoveryRunService:
         *,
         project_id: str,
         connection_id: str,
+        tenant_id: str = "default",
+        database_name: str = "default",
+        schema_name: str = "default",
         thread_id: str | None = None,
         session_id: str | None = None,
         engine: str | None = None,
@@ -77,6 +80,9 @@ class RecoveryRunService:
             session_id=session_id or identity.run_id,
             project_id=project_id,
             connection_id=connection_id,
+            tenant_id=tenant_id,
+            database_name=database_name,
+            schema_name=schema_name,
             active_engine=selected,
             deadline_at=(
                 datetime.now(timezone.utc) + timedelta(seconds=self.deadline_seconds)

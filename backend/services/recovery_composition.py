@@ -11,10 +11,13 @@ from backend.agent.workers.merge import MergeWorker
 from backend.agent.workers.name import NameWorker
 from backend.agent.workers.orm import ORMWorker
 from backend.agent.workers.survey import SurveyWorker
+from backend.agent.memory.service import MemoryService
+from backend.agent.memory.stage import MemoryRecoveryStage
 from backend.config import Config
 from backend.core.identity import RunIdentity
 from backend.engines import EngineRegistry, LangGraphEngine, ManualEngine
 from backend.evidence import EvidenceLedger, SQLiteEvidenceRepository
+from backend.evidence.versioned_repository import SQLiteVersionedEvidenceRepository
 from backend.persistence import LangGraphPersistenceFactory, SQLiteEventLog, SQLiteRunRepository
 from backend.workflow import StageRegistry, WorkflowResultBuilder, schema_recovery_v2
 
@@ -56,13 +59,27 @@ def build_engine_factory(*, runtime, tool_registry, runs: SQLiteRunRepository, e
             "merge": MergeWorker(tool_registry, run_context=run_context, tool_runtime=runtime.tool_runtime, model_gateway=runtime.model_gateway),
         }
         ledger = EvidenceLedger(SQLiteEvidenceRepository(Config.EVIDENCE_DB_PATH))
+        memory_service = MemoryService(
+            Config.MEMORY_V2_DB_PATH,
+            vector_enabled=Config.MEMORY_VECTOR_ENABLED,
+        )
+        versioned_repository = SQLiteVersionedEvidenceRepository(Config.EVIDENCE_DB_PATH)
         dependencies = HybridStageDependencies(
             run_context=run_context, tool_runtime=runtime.tool_runtime,
             model_gateway=runtime.model_gateway, ledger=ledger, legacy_workers=legacy_workers,
+            memory_service=memory_service,
+            versioned_evidence_repository=versioned_repository,
         )
         stages = StageRegistry()
         for worker in ("survey", "column", "name", "code", "orm", "merge"):
             stages.register(Phase4RecoveryStageAdapter(worker, dependencies))
+        for worker in ("memory_retrieve", "memory_verify", "memory_consolidate"):
+            stages.register(MemoryRecoveryStage(
+                worker, memory_service, ledger,
+                read_enabled=Config.MEMORY_V2_READ_ENABLED,
+                write_enabled=Config.MEMORY_V2_WRITE_ENABLED,
+                versioned_repository=versioned_repository,
+            ))
         manual = ManualEngine(
             definition=definition, stages=stages, runs=runs, events=events,
             max_concurrency=Config.WORKFLOW_MAX_CONCURRENCY,
