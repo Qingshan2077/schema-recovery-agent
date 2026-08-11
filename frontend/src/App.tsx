@@ -40,7 +40,9 @@ export default function App() {
   }, [features.flags]);
   const activePage = enabledPages.has(route.page) ? route.page : "analysis";
   const survey = useMemo(
-    () => analysis.data?.steps?.find((step) => step.worker === "survey")?.output as SurveyOutput | undefined,
+    () => analysis.data?.survey_result ?? (
+      analysis.data?.steps?.find((step) => step.worker === "survey")?.output as SurveyOutput | undefined
+    ),
     [analysis.data]
   );
 

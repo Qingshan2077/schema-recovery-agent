@@ -32,7 +32,9 @@ export function AnalysisPage({
   const { t } = useI18n();
   const [selectedRelation, setSelectedRelation] = useState<RelationDetail>();
   const displayError = translateKnownError(error, "analysisRequestFailed", t("analysisRequestFailed"));
-  const survey = data?.steps?.find((step) => step.worker === "survey")?.output as SurveyOutput | undefined;
+  const survey = data?.survey_result ?? (
+    data?.steps?.find((step) => step.worker === "survey")?.output as SurveyOutput | undefined
+  );
   const summary = survey?.summary;
   const mergeSummary = data?.merge_result?.summary;
 

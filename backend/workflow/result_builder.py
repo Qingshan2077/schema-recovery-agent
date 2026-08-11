@@ -17,6 +17,8 @@ class WorkflowResultBuilder:
 
     def build(self, state: RecoveryStateV2) -> dict[str, Any]:
         result = self.artifacts.get_json(state.result_ref) if state.result_ref else None
+        survey_ref = state.output_refs.get("survey_result")
+        survey_result = self.artifacts.get_json(survey_ref) if survey_ref else None
         steps = _steps(state, self.artifacts)
         payload: dict[str, Any] = {
             "session_id": state.session_id,
@@ -50,11 +52,15 @@ class WorkflowResultBuilder:
                 "errors": [item.code for item in state.errors],
             },
         }
+        if survey_result:
+            payload["survey_result"] = _public_survey_result(survey_result)
         if result:
             merge_result = dict(result.get("merge_result", result))
             _normalize_merge_summary(merge_result)
             payload["merge_result"] = merge_result
-            payload["er_diagram"] = result.get("er_diagram") or _er_diagram(merge_result)
+            payload["er_diagram"] = result.get("er_diagram") or _er_diagram(
+                merge_result, survey_result,
+            )
         if state.pending_interrupt:
             payload["pending_interrupt"] = state.pending_interrupt.model_dump(mode="json")
         return payload
@@ -111,8 +117,39 @@ def _normalize_merge_summary(merge_result: dict[str, Any]) -> None:
     })
 
 
-def _er_diagram(merge_result: dict[str, Any]) -> dict[str, Any]:
+def _public_survey_result(survey_result: dict[str, Any]) -> dict[str, Any]:
+    """Expose inventory totals without duplicating SQL or ORM source bodies."""
+
+    return {
+        "status": survey_result.get("status"),
+        "summary": dict(survey_result.get("summary") or {}),
+        "server_info": dict(survey_result.get("server_info") or {}),
+        "tables": {
+            "count": (survey_result.get("tables") or {}).get("count", 0),
+            "list": list((survey_result.get("tables") or {}).get("list") or []),
+        },
+        "views": {"count": (survey_result.get("views") or {}).get("count", 0)},
+        "stored_procedures": {
+            "count": (survey_result.get("stored_procedures") or {}).get("count", 0),
+        },
+        "triggers": {"count": (survey_result.get("triggers") or {}).get("count", 0)},
+        "orm_files": {"count": (survey_result.get("orm_files") or {}).get("count", 0)},
+    }
+
+
+def _er_diagram(
+    merge_result: dict[str, Any], survey_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     tables: dict[str, dict[str, Any]] = {}
+    survey = survey_result or {}
+    for item in survey.get("schema_catalog") or []:
+        table_name = str(item.get("name") or "")
+        if table_name:
+            tables.setdefault(table_name, {"relations": [], "relation_count": 0})
+    for table_name in (survey.get("tables") or {}).get("list") or []:
+        normalized = str(table_name or "")
+        if normalized:
+            tables.setdefault(normalized, {"relations": [], "relation_count": 0})
     relations = [
         relation
         for band in ("high_confidence_relations", "medium_confidence_relations", "low_confidence_relations")

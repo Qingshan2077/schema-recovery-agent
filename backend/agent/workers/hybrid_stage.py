@@ -350,6 +350,16 @@ class Phase4RecoveryStageAdapter:
                 "snapshot_id": actual_snapshot,
                 "database_fingerprint": actual_fingerprint,
             })
+        if self.worker == "merge":
+            repository = self.stage.dependencies.ledger.repository
+            stage_context["_ledger_relations"] = [
+                item.model_dump(mode="json")
+                for item in repository.query_relations(snapshot_id=unit.snapshot_id)
+            ]
+            stage_context["_ledger_evidence"] = [
+                item.model_dump(mode="json")
+                for item in repository.query_evidence(snapshot_id=unit.snapshot_id)
+            ]
         result = await self.stage.execute(unit, stage_context)
         output_artifact = self.stage.dependencies.ledger.write_artifact(
             snapshot_id=unit.snapshot_id,
@@ -613,11 +623,17 @@ def _merge_output(
         else:
             fused = engine.fuse(candidate, legacy_evidence)
         relation = _candidate_output(candidate, None)
+        evidence_chain = [_public_evidence_item(item) for item in scoped]
+        evidence_sources = list(dict.fromkeys(
+            str(item.get("source_type") or "unknown") for item in scoped
+        ))
         relation.update({
             "fused_confidence": fused.probability,
             "confidence_band": fused.band,
             "confidence_breakdown": fused.breakdown.model_dump(mode="json"),
-            "evidence_chain": scoped,
+            "evidence_chain": evidence_chain,
+            "evidence_count": len(evidence_chain),
+            "evidence_sources": evidence_sources,
         })
         bands[fused.band].append(relation)
         details[candidate.relation_id] = fused.breakdown.model_dump(mode="json")
@@ -631,7 +647,10 @@ def _merge_output(
         "low_confidence_relations": bands["low"],
         "total_relations": sum(len(items) for items in bands.values()),
         "evidence_detail": details,
-        "source_contributions": {key: round(value / total_sources * 100, 2) for key, value in source_counts.items()},
+        "source_contributions": {
+            key: {"count": value, "percentage": round(value / total_sources * 100, 2)}
+            for key, value in source_counts.items()
+        },
         "fusion_model_version": Config.FUSION_MODEL_VERSION,
         "fusion_weight_version": Config.FUSION_WEIGHT_VERSION,
     }
@@ -746,6 +765,20 @@ def _candidate_output(candidate: RelationCandidate, artifact_id: str | None) -> 
         "evidence_ids": candidate.evidence_ids,
         "validation_flags": candidate.validation_flags,
         "artifact_id": artifact_id,
+    }
+
+
+def _public_evidence_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Retain typed evidence fields while serving the stable UI projection."""
+
+    strength = float(item.get("strength") or 0.0)
+    reliability = float(item.get("reliability") or 0.0)
+    return {
+        **item,
+        "type": str(item.get("type") or item.get("source_type") or "unknown"),
+        "detail": str(item.get("detail") or item.get("summary") or ""),
+        "strength": strength,
+        "weight": reliability,
     }
 
 

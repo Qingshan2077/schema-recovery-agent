@@ -118,6 +118,7 @@ export interface AnalysisResult {
   database_fingerprint?: string;
   total_steps: number;
   steps: AnalysisStep[];
+  survey_result?: SurveyOutput;
   er_diagram?: ERDiagram;
   merge_result?: MergeResult;
   capability_gaps?: Array<{
