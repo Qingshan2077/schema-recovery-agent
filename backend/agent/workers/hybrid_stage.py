@@ -7,6 +7,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from threading import Thread
+from time import perf_counter
 from typing import Any
 
 from backend.agent.collectors import collector_for
@@ -193,6 +194,7 @@ class HybridRecoveryStage:
                 "evidence_ids": list(dict.fromkeys(evidence_ids)),
                 "relation_ids": list(dict.fromkeys(relation_ids)),
                 "model_call_ids": model_call_ids,
+                "tool_call_ids": collected.tool_call_ids,
                 "used_memory_ids": proposal.used_memory_ids,
                 "ledger_revision": revision,
                 "evidence_requests": pending_requests,
@@ -313,6 +315,7 @@ class Phase4RecoveryStageAdapter:
         unit: WorkUnit,
         context: dict[str, Any],
     ) -> StageResult:
+        stage_started = perf_counter()
         if (state.get("cancellation") or {}).get("requested"):
             return StageResult(
                 stage_id=self.stage_id,
@@ -338,6 +341,11 @@ class Phase4RecoveryStageAdapter:
             if legacy is None:
                 raise RuntimeError("survey bootstrap requires the registered deterministic collector")
             baseline = legacy.run(stage_context)
+            baseline["tool_call_ids"] = list(dict.fromkeys(
+                str(item.get("tool_call_id"))
+                for item in legacy.get_call_log()
+                if item.get("tool_call_id")
+            ))
             server_info = baseline.get("server_info") or {}
             actual_snapshot = server_info.get("snapshot_id")
             actual_fingerprint = server_info.get("database_fingerprint")
@@ -361,6 +369,12 @@ class Phase4RecoveryStageAdapter:
                 for item in repository.query_evidence(snapshot_id=unit.snapshot_id)
             ]
         result = await self.stage.execute(unit, stage_context)
+        result = result.model_copy(update={
+            "output": {
+                **result.output,
+                "duration_ms": max(0, round((perf_counter() - stage_started) * 1000)),
+            },
+        })
         output_artifact = self.stage.dependencies.ledger.write_artifact(
             snapshot_id=unit.snapshot_id,
             subject_refs=unit.subject_refs,
@@ -522,7 +536,7 @@ def build_work_unit(worker_id: str, context: dict[str, Any], *, evidence_round: 
         "worker": worker_id,
         "subjects": subjects,
         "round": evidence_round,
-        "prompt_version": "1.0.0",
+        "prompt_version": WorkerReasoner.prompt_version,
         "fusion_version": Config.FUSION_MODEL_VERSION,
     })
     return WorkUnit(
@@ -681,6 +695,12 @@ def _fuse_versioned(
         upgrade_evidence(item, namespace=namespace, run_id=unit.run_id)
         for item in evidence
     ]
+    if repository is not None:
+        canonical_evidence = []
+        for item in upgraded:
+            canonical, _ = repository.append_evidence(item)
+            canonical_evidence.append(canonical)
+        upgraded = canonical_evidence
     policy = load_fusion_policy(
         Config.FUSION_POLICY_PATH,
         calibration_enabled=Config.CALIBRATION_ENABLED,
@@ -716,9 +736,7 @@ def _fuse_versioned(
             "relation": fusion.relation.model_copy(update={"status": "accepted"}),
         })
     if repository is not None:
-        for item in upgraded:
-            repository.append_evidence(item)
-        if existing is not None and existing.created_by_run_id == unit.run_id:
+        if existing is not None and _same_fusion_state(existing, fusion.relation):
             fusion = fusion.model_copy(update={"relation": existing})
         else:
             repository.append_relation_version(fusion.relation)
@@ -748,6 +766,24 @@ def _fuse_versioned(
         probability=fusion.relation.calibrated_probability,
         band=fusion.relation.confidence_band,
         breakdown=SimpleNamespace(model_dump=lambda **_: breakdown),
+    )
+
+
+def _same_fusion_state(existing: Any, candidate: Any) -> bool:
+    """Reuse a relation version only when a rerun has no semantic change."""
+
+    return (
+        existing.evidence_ids == candidate.evidence_ids
+        and existing.validation_flags == candidate.validation_flags
+        and existing.cardinality == candidate.cardinality
+        and existing.feature_vector == candidate.feature_vector
+        and existing.fusion_version == candidate.fusion_version
+        and existing.calibration_version == candidate.calibration_version
+        and existing.threshold_policy_version == candidate.threshold_policy_version
+        and existing.raw_score == candidate.raw_score
+        and existing.raw_probability == candidate.raw_probability
+        and existing.calibrated_probability == candidate.calibrated_probability
+        and existing.confidence_band == candidate.confidence_band
     )
 
 

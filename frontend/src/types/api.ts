@@ -114,6 +114,8 @@ export interface AnalysisResult {
   attempt?: number;
   status: RunStatus;
   run_status: RunStatus;
+  result_provisional?: boolean;
+  provisional_result_ref?: string;
   snapshot_id?: string;
   database_fingerprint?: string;
   total_steps: number;

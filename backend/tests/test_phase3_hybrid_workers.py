@@ -240,6 +240,64 @@ def test_all_phase3_worker_prompts_are_immutable_and_registered():
     registry.validate_all()
 
     for worker in ("survey", "column", "name", "code", "orm", "merge"):
-        entry = registry.get(f"worker.{worker}.reasoning", "1.0.0")
-        assert entry.output_schema["additionalProperties"] is False
-        assert "probability" not in entry.output_schema["properties"]
+        legacy = registry.get(f"worker.{worker}.reasoning", "1.0.0")
+        active = registry.get(f"worker.{worker}.reasoning")
+        assert legacy.status == "deprecated"
+        assert active.semantic_version == "1.1.0"
+        assert "memory_context" in active.input_schema["required"]
+        assert "used_memory_ids" in active.output_schema["required"]
+        assert active.output_schema["additionalProperties"] is False
+        assert "probability" not in active.output_schema["properties"]
+
+
+def test_evidence_identity_is_run_scoped_when_payload_contains_trace_provenance():
+    from backend.agent.domain.catalog_resolver import RecoveryCatalogResolver
+    from backend.agent.runtime.hybrid_contracts import ReasoningProposal, RelationCandidate
+    from backend.agent.verifiers.worker_verifier import WorkerVerifier
+
+    fact = {
+        "claim_key": "claim_1",
+        "source_type": "name_semantics",
+        "polarity": "support",
+        "strength": 0.7,
+        "reliability": 0.8,
+        "summary": "orders.user_id names users",
+        "source_locator": {"table": "orders", "column": "user_id"},
+        "correlation_seed": "name:orders:user_id",
+    }
+    candidate = RelationCandidate(
+        relation_id="rel_1",
+        claim_key="claim_1",
+        source_table="orders",
+        source_columns=["user_id"],
+        target_table="users",
+        target_columns=["id"],
+    )
+    catalog = RecoveryCatalogResolver(
+        snapshot_id="snp_1",
+        catalog=[
+            {"name": "orders", "columns": [{"column_name": "user_id", "data_type": "int"}]},
+            {"name": "users", "columns": [{"column_name": "id", "data_type": "int", "is_primary_key": True}]},
+        ],
+    )
+
+    def evidence_for(run_id: str, trace_id: str):
+        unit = _unit("name").model_copy(update={"run_id": run_id, "trace_id": trace_id})
+        proposal = ReasoningProposal(
+            proposal_id=f"prop_{run_id}", worker="name", snapshot_id=unit.snapshot_id,
+            candidates=[candidate], decision_summary="grounded", model_profile="test",
+            prompt_version="1.1.0",
+        )
+        return WorkerVerifier("name").verify(
+            unit=unit,
+            proposal=proposal,
+            collector_content={"candidate_facts": [fact]},
+            catalog=catalog,
+            artifact_id="art_shared",
+        ).evidence_items[0]
+
+    first = evidence_for("run_first", "trc_first")
+    second = evidence_for("run_second", "trc_second")
+
+    assert first.evidence_id != second.evidence_id
+    assert first.trace_id != second.trace_id

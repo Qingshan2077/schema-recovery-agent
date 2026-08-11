@@ -22,7 +22,8 @@ from backend.core.identity import new_id
 
 
 class WorkerReasoner:
-    version = "1.0.0"
+    version = "1.1.0"
+    prompt_version = "1.1.0"
 
     def __init__(self, worker: str, gateway: ModelGateway | None):
         self.worker = worker
@@ -42,7 +43,7 @@ class WorkerReasoner:
         request = ModelRequest(
             profile="fast" if self.worker in {"survey", "name"} else "reasoning",
             prompt_id=f"worker.{self.worker}.reasoning",
-            prompt_version="1.0.0",
+            prompt_version=self.prompt_version,
             input={
                 "worker": self.worker,
                 "work_unit": json.dumps(unit.model_dump(mode="json"), ensure_ascii=False),
@@ -132,7 +133,7 @@ class WorkerReasoner:
             evidence_requests=requests,
             decision_summary=parsed.get("decision_summary", ""),
             model_profile="fast" if self.worker in {"survey", "name"} else "reasoning",
-            prompt_version="1.0.0",
+            prompt_version=self.prompt_version,
             model_call_ids=[model_call_id],
             used_memory_ids=parsed.get("used_memory_ids", []),
         )

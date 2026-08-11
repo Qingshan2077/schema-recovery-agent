@@ -593,6 +593,14 @@ button { font: inherit; }
   padding: 12px 14px;
 }
 
+.status-banner {
+  border: 1px solid #d5a93e;
+  border-radius: 10px;
+  background: #fff8df;
+  color: #76500a;
+  padding: 10px 14px;
+}
+
 .table-empty {
   color: var(--text-secondary);
   padding: 16px;

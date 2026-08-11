@@ -91,7 +91,7 @@ class WorkerVerifier:
             source_locator={"seed": fact.get("correlation_seed"), **locator},
         )
         evidence_id = stable_id(
-            "evidence", unit.snapshot_id, candidate.claim_key, self.worker,
+            "evidence", unit.run_id, unit.snapshot_id, candidate.claim_key, self.worker,
             fact.get("polarity"), fact.get("summary"), correlation_key,
         )
         return EvidenceItem(

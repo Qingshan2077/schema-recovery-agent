@@ -16,7 +16,8 @@ class WorkflowResultBuilder:
         self.artifacts = artifacts
 
     def build(self, state: RecoveryStateV2) -> dict[str, Any]:
-        result = self.artifacts.get_json(state.result_ref) if state.result_ref else None
+        merge_ref = state.result_ref or state.output_refs.get("merge_result")
+        result = self.artifacts.get_json(merge_ref) if merge_ref else None
         survey_ref = state.output_refs.get("survey_result")
         survey_result = self.artifacts.get_json(survey_ref) if survey_ref else None
         steps = _steps(state, self.artifacts)
@@ -38,6 +39,8 @@ class WorkflowResultBuilder:
             "evidence_ids": state.evidence_ids,
             "relation_ids": state.relation_ids,
             "result_ref": state.result_ref,
+            "provisional_result_ref": merge_ref if state.result_ref is None else None,
+            "result_provisional": bool(merge_ref and state.result_ref is None),
             "budget": state.budget.model_dump(mode="json"),
             "deadline_at": state.deadline_at.isoformat() if state.deadline_at else None,
             "errors": [item.model_dump(mode="json") for item in state.errors],
@@ -95,7 +98,7 @@ def _steps(state: RecoveryStateV2, artifacts: ArtifactReader) -> list[dict[str, 
             "step": ordering.get(worker, 100 + len(steps)),
             "worker": worker,
             "status": status,
-            "duration_ms": 0,
+            "duration_ms": int((output or {}).get("duration_ms") or 0),
             "tool_calls": [
                 {"tool_call_id": tool_call_id, "tool": "recorded_tool_call"}
                 for tool_call_id in (output or {}).get("tool_call_ids", [])

@@ -57,6 +57,9 @@ export function AnalysisPage({
   return (
     <div className="analysis-page">
       {displayError ? <div className="error-banner">{displayError}</div> : null}
+      {data.result_provisional || data.run_status === "waiting_approval" ? (
+        <div className="status-banner">{t("provisionalAnalysis")}</div>
+      ) : null}
       <section className="overview-grid">
         <StatCard title={t("table")} value={summary?.total_tables ?? "-"} subtitle={t("businessTables")} icon={Database} color="blue" />
         <StatCard title={t("storedProcedure")} value={summary?.total_procedures ?? "-"} subtitle={t("sqlEvidenceSource")} icon={Workflow} color="green" />
@@ -96,6 +99,7 @@ function translateKnownError(error: string | undefined, source: string, target: 
 
 function PipelineTimeline({ steps, engine, fallbackReason }: { steps: AnalysisStep[]; engine?: string; fallbackReason?: string }) {
   const { t } = useI18n();
+  const groupedSteps = groupPipelineSteps(steps);
   return (
     <section className="panel pipeline-panel">
       <div className="section-toolbar">
@@ -106,10 +110,11 @@ function PipelineTimeline({ steps, engine, fallbackReason }: { steps: AnalysisSt
         {fallbackReason ? <span className="pipeline-warning">{t("fallback")}: {fallbackReason}</span> : null}
       </div>
       <div className="pipeline-timeline">
-        {steps.map((step) => (
+        {groupedSteps.map((step) => (
           <div className={`pipeline-step pipeline-step-${step.status}`} key={`${step.worker}-${step.step}`}>
             {["success", "completed"].includes(step.status) ? <CheckCircle2 size={16} /> : <Clock3 size={16} />}
             <strong>{step.worker}</strong>
+            {step.executionCount > 1 ? <span>×{step.executionCount}</span> : null}
             <span>{step.status}</span>
             <small>{step.duration_ms} ms</small>
             <small>{step.tool_calls?.length ?? 0} {t("tools")}</small>
@@ -118,5 +123,41 @@ function PipelineTimeline({ steps, engine, fallbackReason }: { steps: AnalysisSt
       </div>
     </section>
   );
+}
+
+interface GroupedPipelineStep extends AnalysisStep {
+  executionCount: number;
+}
+
+function groupPipelineSteps(steps: AnalysisStep[]): GroupedPipelineStep[] {
+  const grouped = new Map<string, GroupedPipelineStep>();
+  for (const step of steps) {
+    const current = grouped.get(step.worker);
+    if (!current) {
+      grouped.set(step.worker, { ...step, executionCount: 1 });
+      continue;
+    }
+    grouped.set(step.worker, {
+      ...current,
+      status: strongerStepStatus(current.status, step.status),
+      duration_ms: current.duration_ms + step.duration_ms,
+      tool_calls: [...(current.tool_calls ?? []), ...(step.tool_calls ?? [])],
+      executionCount: current.executionCount + 1
+    });
+  }
+  return Array.from(grouped.values()).sort((left, right) => left.step - right.step);
+}
+
+function strongerStepStatus(left: string, right: string): string {
+  const priority: Record<string, number> = {
+    completed: 0,
+    success: 0,
+    partial: 1,
+    degraded: 2,
+    blocked: 3,
+    failed: 4,
+    canceled: 5
+  };
+  return (priority[right] ?? 2) > (priority[left] ?? 2) ? right : left;
 }
 

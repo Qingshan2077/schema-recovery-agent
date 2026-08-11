@@ -43,6 +43,50 @@
       },
       "required": ["candidates", "assumptions", "uncertainties", "evidence_requests", "decision_summary"],
       "additionalProperties": false
+    },
+    "worker_reasoning_v1_1": {
+      "type": "object",
+      "properties": {
+        "candidates": {
+          "type": "array", "maxItems": 500,
+          "items": {
+            "type": "object",
+            "properties": {
+              "source_table": {"type": "string"},
+              "source_columns": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+              "target_table": {"type": "string"},
+              "target_columns": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+              "cardinality": {"type": "string", "enum": ["1:1", "1:N", "N:1", "N:N", "unknown"]},
+              "alternatives": {"type": "array", "items": {"type": "string"}},
+              "validation_flags": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["source_table", "source_columns", "target_table", "target_columns", "cardinality", "alternatives", "validation_flags"],
+            "additionalProperties": false
+          }
+        },
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "uncertainties": {"type": "array", "items": {"type": "string"}},
+        "evidence_requests": {
+          "type": "array", "maxItems": 20,
+          "items": {
+            "type": "object",
+            "properties": {
+              "target_worker": {"type": "string", "enum": ["survey", "column", "name", "code", "orm", "merge"]},
+              "requested_fact": {"type": "string"},
+              "subject_refs": {"type": "array", "items": {"type": "string"}},
+              "allowed_tools": {"type": "array", "items": {"type": "string"}},
+              "reason": {"type": "string"},
+              "expected_information_gain": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "required": ["target_worker", "requested_fact", "subject_refs", "allowed_tools", "reason", "expected_information_gain"],
+            "additionalProperties": false
+          }
+        },
+        "decision_summary": {"type": "string", "maxLength": 3000},
+        "used_memory_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 100}
+      },
+      "required": ["candidates", "assumptions", "uncertainties", "evidence_requests", "decision_summary", "used_memory_ids"],
+      "additionalProperties": false
     }
   },
   "prompts": [
@@ -219,7 +263,7 @@
       "template_path": "workers/survey/reasoning-v1.md", "sha256": "b5f00d90acf141bbfc9f294f64925ea6319936083674cc66ebcbf887a4b7379a",
       "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "policy"], "additionalProperties": false},
       "output_schema_ref": "worker_reasoning", "required_capabilities": ["strict_schema"], "allowed_tools": [],
-      "created_at": "2026-08-10T00:00:00Z", "status": "active"
+      "created_at": "2026-08-10T00:00:00Z", "status": "deprecated"
     },
     {
       "prompt_id": "worker.column.reasoning", "semantic_version": "1.0.0", "agent_id": "recovery.column.reasoner",
@@ -227,7 +271,7 @@
       "template_path": "workers/column/reasoning-v1.md", "sha256": "b980ae6756b04817aaeebd8778fc1cbc3b29f55cb3c118685db3b7ce36a01ddd",
       "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "policy"], "additionalProperties": false},
       "output_schema_ref": "worker_reasoning", "required_capabilities": ["strict_schema"], "allowed_tools": [],
-      "created_at": "2026-08-10T00:00:00Z", "status": "active"
+      "created_at": "2026-08-10T00:00:00Z", "status": "deprecated"
     },
     {
       "prompt_id": "worker.name.reasoning", "semantic_version": "1.0.0", "agent_id": "recovery.name.reasoner",
@@ -235,7 +279,7 @@
       "template_path": "workers/name/reasoning-v1.md", "sha256": "5ac2ee06e0c7059bc60125989f166cbe4d3744b96e179bea8d880761a89902da",
       "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "policy"], "additionalProperties": false},
       "output_schema_ref": "worker_reasoning", "required_capabilities": ["strict_schema"], "allowed_tools": [],
-      "created_at": "2026-08-10T00:00:00Z", "status": "active"
+      "created_at": "2026-08-10T00:00:00Z", "status": "deprecated"
     },
     {
       "prompt_id": "worker.code.reasoning", "semantic_version": "1.0.0", "agent_id": "recovery.code.reasoner",
@@ -243,7 +287,7 @@
       "template_path": "workers/code/reasoning-v1.md", "sha256": "c1cb99ffaa1d09942191f59ca4c8f4f011b114e9f4993fc3be5cbaba2b822c9d",
       "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "policy"], "additionalProperties": false},
       "output_schema_ref": "worker_reasoning", "required_capabilities": ["strict_schema"], "allowed_tools": [],
-      "created_at": "2026-08-10T00:00:00Z", "status": "active"
+      "created_at": "2026-08-10T00:00:00Z", "status": "deprecated"
     },
     {
       "prompt_id": "worker.orm.reasoning", "semantic_version": "1.0.0", "agent_id": "recovery.orm.reasoner",
@@ -251,7 +295,7 @@
       "template_path": "workers/orm/reasoning-v1.md", "sha256": "e4e926f4b3e9419cb7eecc3b519b7c392caf42ec953a7e22827d59ce2f3f5bd9",
       "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "policy"], "additionalProperties": false},
       "output_schema_ref": "worker_reasoning", "required_capabilities": ["strict_schema"], "allowed_tools": [],
-      "created_at": "2026-08-10T00:00:00Z", "status": "active"
+      "created_at": "2026-08-10T00:00:00Z", "status": "deprecated"
     },
     {
       "prompt_id": "worker.merge.reasoning", "semantic_version": "1.0.0", "agent_id": "recovery.merge.reasoner",
@@ -259,7 +303,55 @@
       "template_path": "workers/merge/reasoning-v1.md", "sha256": "48fa772e98c47beefa59ffecb5a21e49a0c22cd42cf375fddc380725a117fe9d",
       "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "policy"], "additionalProperties": false},
       "output_schema_ref": "worker_reasoning", "required_capabilities": ["strict_schema"], "allowed_tools": [],
-      "created_at": "2026-08-10T00:00:00Z", "status": "active"
+      "created_at": "2026-08-10T00:00:00Z", "status": "deprecated"
+    },
+    {
+      "prompt_id": "worker.survey.reasoning", "semantic_version": "1.1.0", "agent_id": "recovery.survey.reasoner",
+      "purpose": "Interpret a snapshot-bound survey inventory with untrusted memory hypotheses.",
+      "template_path": "workers/survey/reasoning-v1.1.md", "sha256": "6a4be06e26e7ec2f1967eabec0491d49b8b08c82e34e61f756610b23349374aa",
+      "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "memory_context": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "memory_context", "policy"], "additionalProperties": false},
+      "output_schema_ref": "worker_reasoning_v1_1", "required_capabilities": ["strict_schema"], "allowed_tools": [],
+      "created_at": "2026-08-11T00:00:00Z", "status": "active"
+    },
+    {
+      "prompt_id": "worker.column.reasoning", "semantic_version": "1.1.0", "agent_id": "recovery.column.reasoner",
+      "purpose": "Interpret independent column relationship facts with untrusted memory hypotheses.",
+      "template_path": "workers/column/reasoning-v1.1.md", "sha256": "0e6ccded1a86a8f246adc33a487a6c8b00dabdfb880ec435d100c64f7e37c429",
+      "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "memory_context": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "memory_context", "policy"], "additionalProperties": false},
+      "output_schema_ref": "worker_reasoning_v1_1", "required_capabilities": ["strict_schema"], "allowed_tools": [],
+      "created_at": "2026-08-11T00:00:00Z", "status": "active"
+    },
+    {
+      "prompt_id": "worker.name.reasoning", "semantic_version": "1.1.0", "agent_id": "recovery.name.reasoner",
+      "purpose": "Interpret naming semantics with untrusted memory hypotheses.",
+      "template_path": "workers/name/reasoning-v1.1.md", "sha256": "fbccd7fa6c980a89c5e16ea057ad87831e662dbe31c8dcf214febfd8f4fab8eb",
+      "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "memory_context": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "memory_context", "policy"], "additionalProperties": false},
+      "output_schema_ref": "worker_reasoning_v1_1", "required_capabilities": ["strict_schema"], "allowed_tools": [],
+      "created_at": "2026-08-11T00:00:00Z", "status": "active"
+    },
+    {
+      "prompt_id": "worker.code.reasoning", "semantic_version": "1.1.0", "agent_id": "recovery.code.reasoner",
+      "purpose": "Interpret parser-grounded SQL lineage with untrusted memory hypotheses.",
+      "template_path": "workers/code/reasoning-v1.1.md", "sha256": "89f70cb1078b80cb11fd90fe5a4728b82e21c62229c158ca189e24e6cbcffe9a",
+      "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "memory_context": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "memory_context", "policy"], "additionalProperties": false},
+      "output_schema_ref": "worker_reasoning_v1_1", "required_capabilities": ["strict_schema"], "allowed_tools": [],
+      "created_at": "2026-08-11T00:00:00Z", "status": "active"
+    },
+    {
+      "prompt_id": "worker.orm.reasoning", "semantic_version": "1.1.0", "agent_id": "recovery.orm.reasoner",
+      "purpose": "Interpret ORM mappings with untrusted memory hypotheses.",
+      "template_path": "workers/orm/reasoning-v1.1.md", "sha256": "c79ccc2b4b16b18da0f84eacce4ea0be3f43812a18e701ac1afd5102b2baa4a0",
+      "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "memory_context": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "memory_context", "policy"], "additionalProperties": false},
+      "output_schema_ref": "worker_reasoning_v1_1", "required_capabilities": ["strict_schema"], "allowed_tools": [],
+      "created_at": "2026-08-11T00:00:00Z", "status": "active"
+    },
+    {
+      "prompt_id": "worker.merge.reasoning", "semantic_version": "1.1.0", "agent_id": "recovery.merge.reasoner",
+      "purpose": "Explain ledger conflicts with untrusted memory hypotheses without changing fusion confidence.",
+      "template_path": "workers/merge/reasoning-v1.1.md", "sha256": "88a6e1aa09e96c72d76805b3521356adb1e617b14a8f8c5ba85c76f71ab027db",
+      "input_schema": {"type": "object", "properties": {"worker": {"type": "string"}, "work_unit": {"type": "string"}, "collector_summary": {"type": "string"}, "memory_context": {"type": "string"}, "policy": {"type": "string"}}, "required": ["worker", "work_unit", "collector_summary", "memory_context", "policy"], "additionalProperties": false},
+      "output_schema_ref": "worker_reasoning_v1_1", "required_capabilities": ["strict_schema"], "allowed_tools": [],
+      "created_at": "2026-08-11T00:00:00Z", "status": "active"
     }
   ]
 }
