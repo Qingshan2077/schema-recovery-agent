@@ -11,15 +11,16 @@ from typing import Any, Iterator
 
 from backend.agent.runtime.contracts import RuntimeUsage
 from backend.agent.runtime.redaction import RedactionPolicy
-from backend.core.identity import new_id
+from backend.core.identity import new_id, stable_id
 from backend.workflow.contracts import RecoveryStateV2, WorkflowEvent
 
 
 class SQLiteEventLog:
-    def __init__(self, db_path: str | Path, redaction: RedactionPolicy | None = None):
+    def __init__(self, db_path: str | Path, redaction: RedactionPolicy | None = None, trace_recorder: Any | None = None):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.redaction = redaction or RedactionPolicy()
+        self.trace_recorder = trace_recorder
         self._migrate()
 
     def append(
@@ -38,10 +39,16 @@ class SQLiteEventLog:
         with self._transaction() as connection:
             row = connection.execute("SELECT COALESCE(MAX(sequence), 0) AS last FROM run_events WHERE run_id=?", (state.run_id,)).fetchone()
             sequence = int(row["last"]) + 1
+            run_span_id = stable_id("span", state.run_id, "run")
+            event_span_id = span_id or (
+                run_span_id if node_id == "run_service"
+                else stable_id("span", state.run_id, node_id, attempt)
+            )
             event = WorkflowEvent(
                 event_id=event_id, sequence=sequence, timestamp=datetime.now(timezone.utc),
                 run_id=state.run_id, session_id=state.session_id, trace_id=state.trace_id,
-                span_id=span_id or new_id("span"), parent_span_id=parent_span_id,
+                span_id=event_span_id,
+                parent_span_id=parent_span_id or (None if event_span_id == run_span_id else run_span_id),
                 agent_id=state.active_engine, node_id=node_id, attempt=attempt,
                 type=event_type, status=status, payload=self.redaction.redact(payload or {}),
                 usage=state.budget, redaction={"level": self.redaction.level},
@@ -55,6 +62,8 @@ class SQLiteEventLog:
                     _json(event.usage.model_dump(mode="json")), event.timestamp.isoformat(),
                 ),
             )
+        if self.trace_recorder is not None:
+            self.trace_recorder.record_event(event)
         return event
 
     def replay(self, run_id: str, *, after_sequence: int = 0, limit: int = 1000) -> list[WorkflowEvent]:

@@ -31,6 +31,7 @@ class MemoryRecoveryStage:
         self, worker: str, service: MemoryService, ledger: EvidenceLedger,
         *, read_enabled: bool = True, write_enabled: bool = True,
         versioned_repository: Any | None = None,
+        retrieval_top_k: int = 20, context_token_budget: int = 4000,
     ):
         if worker not in _STAGE_IDS:
             raise ValueError(f"unknown memory worker: {worker}")
@@ -41,6 +42,8 @@ class MemoryRecoveryStage:
         self.read_enabled = read_enabled
         self.write_enabled = write_enabled
         self.versioned_repository = versioned_repository
+        self.retrieval_top_k = retrieval_top_k
+        self.context_token_budget = context_token_budget
         self._cancelled = False
 
     async def execute(
@@ -77,6 +80,8 @@ class MemoryRecoveryStage:
                 object_ids=unit.subject_refs,
                 query_text=" ".join(unit.subject_refs),
                 current_run_id=unit.run_id,
+                top_k=self.retrieval_top_k,
+                token_budget=self.context_token_budget,
             ))
             return StageResult(
                 stage_id=self.stage_id,
@@ -126,11 +131,13 @@ class MemoryRecoveryStage:
             connection_key=namespace.canonical_connection_id or "",
             database_key=namespace.canonical_database_name or "",
             schema_key=namespace.canonical_schema_name or "",
-            status="accepted",
+            status=None,
             limit=1000,
         )
         written = []
         for relation in relations:
+            if relation.status not in {"accepted", "corrected"}:
+                continue
             evidence = self.versioned_repository.query_evidence(relation_id=relation.relation_id)
             memory = self.service.consolidate_relation(
                 relation,

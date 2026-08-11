@@ -62,6 +62,27 @@ class ToolRuntime:
     def set_allowlist(self, agent_id: str, allowed: set[str]) -> None:
         self._allowlists[agent_id] = set(allowed)
 
+    def fork(self, *, executor_overrides: dict[str, Callable[..., Any]] | None = None) -> "ToolRuntime":
+        """Create an isolated runtime with identical contracts and selected executors.
+
+        Eval uses this to bind catalog tools to immutable fixtures. Specs, policy and
+        allowlists stay identical to production, while no production connection or
+        mutable tool is reachable from the case namespace.
+        """
+        overrides = executor_overrides or {}
+        forked = ToolRuntime(
+            allowlists={agent: set(items) for agent, items in self._allowlists.items()},
+            artifact_store=self.artifact_store,
+            enforcement=self.enforcement,
+            max_argument_bytes=self.max_argument_bytes,
+        )
+        for name, (spec, executor) in self._tools.items():
+            forked.register(spec, overrides.get(name, executor))
+        unknown = set(overrides) - set(self._tools)
+        if unknown:
+            raise KeyError(f"cannot override unregistered tools: {sorted(unknown)}")
+        return forked
+
     def execute_sync(
         self,
         request: ToolCallRequest,
@@ -110,6 +131,17 @@ class ToolRuntime:
                 }
             )
         return discovered
+
+    def public_inventory(self) -> list[dict[str, str]]:
+        return [
+            {
+                "name": name,
+                "version": spec.version,
+                "capability": spec.capability,
+                "side_effect": spec.side_effect,
+            }
+            for name, (spec, _) in sorted(self._tools.items())
+        ]
 
     async def execute(
         self,

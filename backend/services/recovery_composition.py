@@ -39,15 +39,21 @@ def preflight_recovery_persistence() -> None:
         persistence.close()
 
 
-def build_engine_factory(*, runtime, tool_registry, runs: SQLiteRunRepository, events: SQLiteEventLog):
+def build_engine_factory(*, runtime, tool_registry, runs: SQLiteRunRepository, events: SQLiteEventLog, traces=None):
     definition = schema_recovery_v2()
 
     def factory(state):
         identity = RunIdentity(run_id=state.run_id, trace_id=state.trace_id, thread_id=state.thread_id)
         run_budget = build_default_budget(Config)
         run_budget.deadline_at = state.deadline_at
+        if traces is not None:
+            from backend.observability.tracing import TraceEventSink
+            trace_sink = TraceEventSink(traces)
+        else:
+            trace_sink = None
         run_context = RunContext.from_identity(
             identity, agent_id="recovery.workflow", budget=run_budget,
+            event_sink=trace_sink,
         )
         run_context.budget.restore(state.budget)
         legacy_workers = {
@@ -79,6 +85,8 @@ def build_engine_factory(*, runtime, tool_registry, runs: SQLiteRunRepository, e
                 read_enabled=Config.MEMORY_V2_READ_ENABLED,
                 write_enabled=Config.MEMORY_V2_WRITE_ENABLED,
                 versioned_repository=versioned_repository,
+                retrieval_top_k=Config.MEMORY_RETRIEVAL_TOP_K,
+                context_token_budget=Config.MEMORY_CONTEXT_MAX_TOKENS,
             ))
         manual = ManualEngine(
             definition=definition, stages=stages, runs=runs, events=events,

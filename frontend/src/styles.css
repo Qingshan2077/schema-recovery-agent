@@ -693,6 +693,7 @@ button { font: inherit; }
 }
 
 .loading-step-success,
+.loading-step-completed,
 .loading-step-partial,
 .loading-step-skipped {
   border-color: var(--border);
@@ -700,7 +701,9 @@ button { font: inherit; }
   color: var(--text-primary);
 }
 
-.loading-step-error {
+.loading-step-error,
+.loading-step-failed,
+.loading-step-canceled {
   border-color: #fecaca;
   background: #fef2f2;
   color: #991b1b;
@@ -805,7 +808,8 @@ button { font: inherit; }
   font-size: 12px;
 }
 
-.pipeline-step-success {
+.pipeline-step-success,
+.pipeline-step-completed {
   border-left: 3px solid var(--confidence-high);
 }
 
@@ -814,7 +818,9 @@ button { font: inherit; }
   border-left: 3px solid var(--confidence-medium);
 }
 
-.pipeline-step-error {
+.pipeline-step-error,
+.pipeline-step-failed,
+.pipeline-step-canceled {
   border-left: 3px solid var(--confidence-low);
 }
 
@@ -1008,4 +1014,14 @@ button { font: inherit; }
 .contribution-row { display: grid; grid-template-columns: minmax(180px, 1fr) 180px 72px; gap: 8px; align-items: center; }
 .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 .metric-grid > div { display: flex; flex-direction: column; padding: 10px; background: #f8f9fc; border-radius: 8px; }
+.er-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 34%); gap: 16px; margin-bottom: 16px; align-items: start; }
+.er-canvas { width: 100%; min-height: 440px; border: 1px solid var(--border); border-radius: 12px; background: radial-gradient(circle at center, #fff 0, #f8fafc 75%); }
+.er-edge { cursor: pointer; stroke: #94a3b8; stroke-width: 2; fill: #94a3b8; }
+.er-edge.high { stroke: var(--confidence-high); fill: var(--confidence-high); }
+.er-edge.medium { stroke: var(--confidence-medium); fill: var(--confidence-medium); stroke-dasharray: 7 4; }
+.er-edge.low { stroke: var(--confidence-low); fill: var(--confidence-low); stroke-dasharray: 3 5; }
+.er-edge:hover { stroke-width: 4; }
+.er-node rect { fill: #fff; stroke: #2563eb; stroke-width: 1.5; }
+.er-node text { fill: var(--text-primary); font-size: 12px; font-weight: 600; pointer-events: none; }
 @media (max-width: 900px) { .workbench-split { grid-template-columns: 1fr; } .timeline article { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .er-workspace { grid-template-columns: 1fr; } }

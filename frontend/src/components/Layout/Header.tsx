@@ -1,16 +1,16 @@
-import { Activity, BarChart3, BrainCircuit, GitBranch, Languages, MessageSquareText, Play, RefreshCw, ShieldCheck, Route, FlaskConical } from "lucide-react";
+import { Activity, BarChart3, BrainCircuit, GitBranch, Languages, MessageSquareText, Play, RefreshCw, ShieldCheck, Route, FlaskConical, Network } from "lucide-react";
 import { useI18n } from "../../i18n/LanguageContext";
-
-type PageKey = "analysis" | "chat" | "monitor" | "eval" | "memory" | "approvals" | "runs" | "evidence" | "quality";
+import type { PageKey } from "../../app/router";
 
 interface HeaderProps {
   activePage: PageKey;
   onPageChange: (page: PageKey) => void;
   onAnalyze: () => void;
   analyzing: boolean;
+  enabledPages: Set<PageKey>;
 }
 
-export function Header({ activePage, onPageChange, onAnalyze, analyzing }: HeaderProps) {
+export function Header({ activePage, onPageChange, onAnalyze, analyzing, enabledPages }: HeaderProps) {
   const { t, toggleLanguage, language } = useI18n();
   return (
     <header className="app-header">
@@ -38,14 +38,15 @@ export function Header({ activePage, onPageChange, onAnalyze, analyzing }: Heade
           <BarChart3 size={16} />
           {t("navEval")}
         </button>
-        <button className={activePage === "memory" ? "active" : ""} type="button" onClick={() => onPageChange("memory")}>
+        {enabledPages.has("memory") && <button className={activePage === "memory" ? "active" : ""} type="button" onClick={() => onPageChange("memory")}>
           <BrainCircuit size={16} />
           {language === "zh" ? "\u8bb0\u5fc6" : "Memory"}
-        </button>
-        <button className={activePage === "approvals" ? "active" : ""} type="button" onClick={() => onPageChange("approvals")}><ShieldCheck size={16}/>{language === "zh" ? "\u5ba1\u6279" : "Approvals"}</button>
-        <button className={activePage === "runs" ? "active" : ""} type="button" onClick={() => onPageChange("runs")}><Route size={16}/>{language === "zh" ? "\u8fd0\u884c" : "Runs"}</button>
-        <button className={activePage === "evidence" ? "active" : ""} type="button" onClick={() => onPageChange("evidence")}><FlaskConical size={16}/>{language === "zh" ? "\u8bc1\u636e" : "Evidence"}</button>
-        <button className={activePage === "quality" ? "active" : ""} type="button" onClick={() => onPageChange("quality")}><BarChart3 size={16}/>{language === "zh" ? "\u8d28\u91cf" : "Quality"}</button>
+        </button>}
+        {enabledPages.has("approvals") && <button className={activePage === "approvals" ? "active" : ""} type="button" onClick={() => onPageChange("approvals")}><ShieldCheck size={16}/>{language === "zh" ? "\u5ba1\u6279" : "Approvals"}</button>}
+        {enabledPages.has("runs") && <button className={activePage === "runs" ? "active" : ""} type="button" onClick={() => onPageChange("runs")}><Route size={16}/>{language === "zh" ? "\u8fd0\u884c" : "Runs"}</button>}
+        {enabledPages.has("evidence") && <button className={activePage === "evidence" ? "active" : ""} type="button" onClick={() => onPageChange("evidence")}><FlaskConical size={16}/>{language === "zh" ? "\u8bc1\u636e" : "Evidence"}</button>}
+        {enabledPages.has("er") && <button className={activePage === "er" ? "active" : ""} type="button" onClick={() => onPageChange("er")}><Network size={16}/>ER</button>}
+        {enabledPages.has("quality") && <button className={activePage === "quality" ? "active" : ""} type="button" onClick={() => onPageChange("quality")}><BarChart3 size={16}/>{language === "zh" ? "\u8d28\u91cf" : "Quality"}</button>}
       </nav>
       <div className="header-actions">
         <button className="secondary-button" type="button" onClick={toggleLanguage}>

@@ -1,7 +1,8 @@
 import type { ChatEventPage, ChatMessage, ChatThreadResponse, QAOutput, StartedQARun } from "../types/api";
+import { threadStore } from "../app/stores/threadStore";
 
 const THREAD_KEY = "schema-recovery.qa-thread-id";
-const TERMINAL_EVENTS = new Set(["run.completed", "run.failed", "run.cancelled"]);
+const TERMINAL_EVENTS = new Set(["run.completed", "run.failed", "run.canceled"]);
 
 interface ChatState {
   threadId?: string;
@@ -15,7 +16,7 @@ interface ChatState {
 }
 
 let state: ChatState = {
-  threadId: window.localStorage.getItem(THREAD_KEY) ?? undefined,
+  threadId: threadStore.get().threadId ?? window.localStorage.getItem(THREAD_KEY) ?? undefined,
   messages: [],
   loading: false,
   initialized: false,
@@ -65,6 +66,7 @@ export const chatStore = {
         if (response.ok) {
           const thread = (await response.json()) as ChatThreadResponse;
           publish({ messages: mapThread(thread), cursor: thread.last_sequence, loading: false });
+          threadStore.update({ threadId, cursor: thread.last_sequence });
           return;
         }
         window.localStorage.removeItem(THREAD_KEY);
@@ -76,6 +78,7 @@ export const chatStore = {
         body: JSON.stringify({ title: "Schema Q&A" })
       });
       window.localStorage.setItem(THREAD_KEY, created.thread_id);
+      threadStore.update({ threadId: created.thread_id, cursor: 0 });
       publish({ threadId: created.thread_id, messages: [], loading: false });
     } catch (error) {
       publish({ initialized: false, loading: false, error: error instanceof Error ? error.message : "chatRequestFailed" });
@@ -99,6 +102,7 @@ export const chatStore = {
         body: JSON.stringify({ content: trimmed, idempotency_key: crypto.randomUUID() })
       });
       publish({ activeRunId: started.run_id });
+      threadStore.update({ threadId, runId: started.run_id });
       await this.poll(threadId, started.run_id);
     } catch (error) {
       publish({ loading: false, activeRunId: undefined, error: error instanceof Error ? error.message : "chatRequestFailed" });
@@ -110,11 +114,13 @@ export const chatStore = {
       const page = await json<ChatEventPage>(`/api/v2/threads/${threadId}/events?after_sequence=${state.cursor}`);
       const latest = [...page.events].reverse().find((event) => event.run_id === runId);
       publish({ cursor: page.next_sequence, activity: latest ? activityLabel(latest.event_type) : state.activity });
+      threadStore.update({ cursor: page.next_sequence, runId });
       terminal = page.events.some((event) => event.run_id === runId && TERMINAL_EVENTS.has(event.event_type));
       if (!terminal) await new Promise((resolve) => window.setTimeout(resolve, 500));
     }
     const thread = await json<ChatThreadResponse>(`/api/v2/threads/${threadId}`);
     publish({ messages: mapThread(thread), loading: false, activeRunId: undefined, activity: undefined });
+    threadStore.update({ threadId, runId: null, cursor: thread.last_sequence });
   },
   async cancel() {
     if (!state.activeRunId) return;

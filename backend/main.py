@@ -27,7 +27,7 @@ from backend.config import Config
 from backend.core.identity import RunIdentity
 from backend.core.legacy_ids import LegacyIdStore
 from backend.core.run_store import RunStore
-from backend.core.status import RunStatus
+from backend.core.status import RunStatus, coerce_run_status
 from backend.schemas import (
     ChatRequest,
     EventSequencer,
@@ -46,12 +46,30 @@ app.include_router(create_trace_router(lambda: _trace_recorder()))
 app.include_router(create_dba_router(lambda: _dba_service()))
 
 
+@app.middleware("http")
+async def trace_http_request(request, call_next):
+    recorder = getattr(app.state, "trace_recorder", None)
+    if recorder is None or not Config.OTEL_ENABLED:
+        return await call_next(request)
+    from backend.observability.tracing import parse_traceparent, traceparent
+    incoming_trace, incoming_parent = parse_traceparent(request.headers.get("traceparent"))
+    with recorder.span(
+        "http.request", trace_id=incoming_trace, parent_span_id=incoming_parent,
+        attributes={"http.method": request.method, "http.route": request.url.path},
+    ) as span:
+        response = await call_next(request)
+        span.set(**{"http.status_code": response.status_code})
+        response.headers["traceparent"] = traceparent(span.trace_id, span.span_id)
+        return response
+
+
 @app.on_event("startup")
 async def startup() -> None:
     from backend.agent.memory.global_memory import GlobalMemory
     from backend.agent.memory.service import MemoryService
     from backend.evidence.versioned_repository import SQLiteVersionedEvidenceRepository
     from backend.eval_v2.artifacts import EvalArtifactStore
+    from backend.eval_v2.case_executor import FixtureCaseExecutor
     from backend.eval_v2.registry import DatasetRegistry
     from backend.eval_v2.service import EvalService
     from backend.eval_v2.store import EvalStore
@@ -71,12 +89,30 @@ async def startup() -> None:
     app.state.versioned_evidence_repository = SQLiteVersionedEvidenceRepository(
         Config.EVIDENCE_DB_PATH,
     )
-    app.state.trace_recorder = TraceRecorder(Config.TRACE_DB_PATH)
+    from backend.evidence.policy_loader import calibration_artifact_from_policy
+    app.state.versioned_evidence_repository.put_calibration(
+        calibration_artifact_from_policy(
+            Config.FUSION_POLICY_PATH,
+            git_sha=Config.DEPLOYMENT_GIT_SHA,
+        )
+    )
+    trace_exporters = []
+    if Config.OTEL_ENABLED and Config.OTEL_EXPORTER_OTLP_ENDPOINT:
+        from backend.observability.otel_exporter import OpenTelemetrySpanExporter
+        trace_exporters.append(OpenTelemetrySpanExporter(
+            endpoint=Config.OTEL_EXPORTER_OTLP_ENDPOINT,
+            service_name=Config.OTEL_SERVICE_NAME,
+        ))
+    app.state.trace_recorder = TraceRecorder(Config.TRACE_DB_PATH, exporters=trace_exporters)
     app.state.eval_service = EvalService(
         registry=DatasetRegistry(Config.EVAL_DATASET_REGISTRY_PATH),
         store=EvalStore(Config.EVAL_V2_DB_PATH),
         artifacts=EvalArtifactStore(Config.EVAL_ARTIFACT_DIR),
         traces=app.state.trace_recorder,
+        executor=FixtureCaseExecutor(
+            runtime=app.state.runtime,
+            traces=app.state.trace_recorder,
+        ),
     )
     app.state.dba_service = DBAService(
         store=OperationStore(Config.DBA_OPERATION_DB_PATH),
@@ -90,12 +126,15 @@ async def startup() -> None:
 
     preflight_recovery_persistence()
     app.state.recovery_run_repository = SQLiteRunRepository(Config.RECOVERY_RUN_DB_PATH)
-    app.state.recovery_event_log = SQLiteEventLog(Config.RECOVERY_RUN_DB_PATH)
+    app.state.recovery_event_log = SQLiteEventLog(
+        Config.RECOVERY_RUN_DB_PATH, trace_recorder=app.state.trace_recorder,
+    )
     engine_factory = build_engine_factory(
         runtime=app.state.runtime,
         tool_registry=app.state.tool_registry,
         runs=app.state.recovery_run_repository,
         events=app.state.recovery_event_log,
+        traces=app.state.trace_recorder,
     )
     app.state.recovery_run_service = RecoveryRunService(
         runs=app.state.recovery_run_repository,
@@ -127,6 +166,7 @@ async def startup() -> None:
         repository=app.state.chat_repository,
         qa_agent=app.state.qa_agent,
         runtime=app.state.runtime,
+        traces=app.state.trace_recorder,
     )
     app.state.schema_graph = None
     app.state.langgraph_error = None
@@ -160,6 +200,16 @@ async def health() -> dict[str, Any]:
         "state_schema_version": Config.STATE_SCHEMA_VERSION,
         "checkpoint_backend": Config.CHECKPOINT_BACKEND,
         "store_backend": Config.STORE_BACKEND,
+        "feature_flags": {
+            "agent_workbench": Config.AGENT_WORKBENCH_ENABLED,
+            "run_inspector": Config.RUN_INSPECTOR_ENABLED,
+            "evidence_workbench": Config.EVIDENCE_WORKBENCH_ENABLED,
+            "er_explorer_v2": Config.ER_EXPLORER_V2_ENABLED,
+            "approval_center": Config.APPROVAL_CENTER_ENABLED and Config.DBA_V2_ENABLED,
+            "memory_inspector": Config.MEMORY_INSPECTOR_ENABLED,
+            "eval_v2": Config.EVAL_V2_ENABLED,
+            "tracing": Config.OTEL_ENABLED,
+        },
     }
 
 
@@ -322,7 +372,7 @@ async def chat(request: ChatRequest) -> dict[str, Any]:
             "qa_run_id": qa_run.run_id,
             "citations": output.get("citations", []),
             "artifacts": output.get("artifacts", []),
-        }, RunStatus(qa_run.status))
+        }, coerce_run_status(qa_run.status))
 
     worker = QAWorker(
         app.state.tool_registry,
@@ -470,7 +520,7 @@ def _legacy_event_type(event_type: str) -> str:
     if event_type == "run.started":
         return "started"
     if event_type.startswith("stage."):
-        return "node_complete" if event_type == "stage.completed" else "node_started"
+        return "node_started" if event_type in {"stage.scheduled", "stage.started", "stage.retrying"} else "node_complete"
     if event_type.startswith("run.") and event_type.split(".", 1)[1] in {
         "completed", "partial", "degraded", "blocked", "failed", "canceled",
     }:
@@ -505,7 +555,7 @@ def _analysis_stream(identity: RunIdentity, runtime_context: RunContext | None) 
             sequencer,
             store,
             legacy_type="complete",
-            event_type="run.completed" if result["run_status"] != "error" else "run.failed",
+            event_type="run.completed" if result["run_status"] != "failed" else "run.failed",
             status=result["run_status"],
             data=analysis_result_v1(result),
         )

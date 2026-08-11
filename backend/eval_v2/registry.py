@@ -30,8 +30,8 @@ class DatasetRegistry:
             raise KeyError(f"dataset_not_registered:{dataset_id}:{version}")
         base = self._safe_path(entry["path"])
         manifest_payload = json.loads((base / "dataset-manifest.json").read_text(encoding="utf-8"))
-        manifest = DatasetManifest.model_validate(manifest_payload)
-        if entry.get("content_hash") and entry["content_hash"] != manifest.content_hash:
+        declared_manifest = DatasetManifest.model_validate(manifest_payload)
+        if entry.get("content_hash") and entry["content_hash"] != declared_manifest.content_hash:
             raise DatasetIntegrityError("registry and dataset manifest hash mismatch")
         split_path = self._safe_path(str(Path(entry["path"]) / "splits" / f"{split}.json"))
         split_payload = json.loads(split_path.read_text(encoding="utf-8"))
@@ -39,8 +39,39 @@ class DatasetRegistry:
         cases = [EvalCase.model_validate(json.loads(line)) for line in case_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         allowed_ids = set(split_payload.get("case_ids") or [])
         selected = [case for case in cases if case.case_id in allowed_ids and case.split == split]
-        if content_hash([case.model_dump(mode="json") for case in selected]) != manifest.split_hashes.get(split):
+        if len(selected) != len(allowed_ids):
+            raise DatasetIntegrityError("split references missing or mismatched cases")
+        computed_split_hash = content_hash([case.model_dump(mode="json") for case in selected])
+        declared_split_hash = declared_manifest.split_hashes.get(split)
+        if declared_split_hash not in {None, "computed"} and computed_split_hash != declared_split_hash:
             raise DatasetIntegrityError("split content hash mismatch")
+        computed_fixture_hashes: dict[str, str] = {}
+        for case in cases:
+            fixture_hash = content_hash(case.input.get("fixture") or {})
+            existing_fixture_hash = computed_fixture_hashes.get(case.fixture_id)
+            if existing_fixture_hash is not None and existing_fixture_hash != fixture_hash:
+                raise DatasetIntegrityError(
+                    f"fixture_id maps to different immutable snapshots: {case.fixture_id}"
+                )
+            computed_fixture_hashes[case.fixture_id] = fixture_hash
+        computed_splits: dict[str, str] = {}
+        for split_name in declared_manifest.split_hashes:
+            descriptor_path = self._safe_path(str(Path(entry["path"]) / "splits" / f"{split_name}.json"))
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+            descriptor_case_path = self._safe_path(str(Path(entry["path"]) / descriptor["cases_file"]))
+            descriptor_cases = [EvalCase.model_validate(json.loads(line)) for line in descriptor_case_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            descriptor_ids = set(descriptor.get("case_ids") or [])
+            descriptor_selected = [case for case in descriptor_cases if case.case_id in descriptor_ids and case.split == split_name]
+            if len(descriptor_selected) != len(descriptor_ids):
+                raise DatasetIntegrityError(f"split references missing or mismatched cases: {split_name}")
+            computed_splits[split_name] = content_hash([case.model_dump(mode="json") for case in descriptor_selected])
+        normalized = declared_manifest.model_copy(update={
+            "split_hashes": computed_splits,
+            "fixture_hashes": computed_fixture_hashes,
+        })
+        manifest = normalized.model_copy(update={
+            "content_hash": content_hash(normalized.model_dump(mode="json", exclude={"content_hash"})),
+        })
         return manifest, selected
 
     def _registry(self) -> dict:

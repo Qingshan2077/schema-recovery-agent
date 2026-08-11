@@ -18,7 +18,7 @@ def build_manifest(
         eval_run_id=eval_run_id, git_sha=git_sha, dirty_worktree=dirty_worktree,
         dataset_id=dataset.dataset_id, dataset_version=dataset.version,
         dataset_hash=dataset.content_hash, split=request.split,
-        case_ids_hash=content_hash(case_ids), snapshot_hashes={}, engine=request.engine,
+        case_ids_hash=content_hash(case_ids), snapshot_hashes=dict(dataset.fixture_hashes), engine=request.engine,
         model_profiles=dict(versions.get("model_profiles") or {}),
         provider_versions=dict(versions.get("provider_versions") or {}),
         prompt_hashes=dict(versions.get("prompt_hashes") or {}),
@@ -29,7 +29,11 @@ def build_manifest(
         memory_mode=str(versions.get("memory_mode") or "isolated"),
         runtime_config_hash=content_hash(versions.get("runtime_config") or {}),
         seed=request.seed,
-        determinism="deterministic" if request.seed is not None else "non_deterministic",
+        determinism=(
+            str(versions.get("determinism"))
+            if versions.get("determinism") in {"deterministic", "best_effort", "non_deterministic"}
+            else "best_effort" if request.seed is not None else "non_deterministic"
+        ),
         mode=request.mode, gate_policy=request.gate_policy,
         started_at=datetime.now(timezone.utc),
     )

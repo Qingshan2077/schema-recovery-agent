@@ -100,6 +100,16 @@ class EvalStore:
                 (decision.gate_id, decision.eval_run_id, decision.status, content_hash(payload), canonical_json(payload)),
             )
 
+    def gate_for_run(self, eval_run_id: str) -> GateDecision:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM eval_gate_decisions WHERE eval_run_id=? ORDER BY rowid DESC LIMIT 1",
+                (eval_run_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(eval_run_id)
+        return GateDecision.model_validate_json(row["payload_json"])
+
     def promote(self, promotion: BaselinePromotion) -> None:
         with self.transaction() as connection:
             connection.execute("UPDATE eval_baselines SET active=0 WHERE gate=?", (promotion.gate,))

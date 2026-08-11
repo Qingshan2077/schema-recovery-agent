@@ -106,7 +106,7 @@ function PipelineTimeline({ steps, engine, fallbackReason }: { steps: AnalysisSt
       <div className="pipeline-timeline">
         {steps.map((step) => (
           <div className={`pipeline-step pipeline-step-${step.status}`} key={`${step.worker}-${step.step}`}>
-            {step.status === "success" ? <CheckCircle2 size={16} /> : <Clock3 size={16} />}
+            {["success", "completed"].includes(step.status) ? <CheckCircle2 size={16} /> : <Clock3 size={16} />}
             <strong>{step.worker}</strong>
             <span>{step.status}</span>
             <small>{step.duration_ms} ms</small>

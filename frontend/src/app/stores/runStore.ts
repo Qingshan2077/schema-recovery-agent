@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from "react";
 import type { DomainEvent, EventState } from "../../types/events";
 
-let state: EventState = { cursor: 0, gap: null, events: [] };
+interface RunEventState extends EventState { runId: string | null; }
+const STORAGE_PREFIX = "schema-agent-run-events-v2:";
+let state: RunEventState = { runId: null, cursor: 0, gap: null, events: [] };
 const listeners = new Set<() => void>();
 
 export function reduceEvents(incoming: DomainEvent[]) {
@@ -14,7 +16,21 @@ export function reduceEvents(incoming: DomainEvent[]) {
     state = { ...state, cursor: Math.max(state.cursor, event.sequence), events: [...state.events, event], gap };
     known.add(event.sequence);
   }
+  persistRunEvents();
   listeners.forEach((listener) => listener());
+}
+
+export function selectRun(runId: string) {
+  if (state.runId === runId) return;
+  try {
+    const restored = JSON.parse(sessionStorage.getItem(STORAGE_PREFIX + runId) ?? "null");
+    state = restored ? { runId, cursor: restored.cursor ?? 0, gap: restored.gap ?? null, events: restored.events ?? [] } : { runId, cursor: 0, gap: null, events: [] };
+  } catch { state = { runId, cursor: 0, gap: null, events: [] }; }
+  listeners.forEach((listener) => listener());
+}
+
+export function persistRunEvents() {
+  if (state.runId) sessionStorage.setItem(STORAGE_PREFIX + state.runId, JSON.stringify(state));
 }
 
 export function useRunStore() { return useSyncExternalStore((listener) => { listeners.add(listener); return () => listeners.delete(listener); }, () => state); }

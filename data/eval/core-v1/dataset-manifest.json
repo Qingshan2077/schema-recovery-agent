@@ -1,0 +1,20 @@
+{
+  "dataset_id": "schema-agent-qa-core",
+  "version": "1.0.0",
+  "content_hash": "computed",
+  "created_at": "2026-08-11T00:00:00Z",
+  "dialects": ["mysql", "postgresql"],
+  "domains": ["commerce", "identity"],
+  "case_schema_version": "2.0",
+  "annotation_guideline_version": "qa-grounding-v1",
+  "fixture_hashes": {},
+  "split_hashes": {
+    "dev": "computed",
+    "public_test": "computed"
+  },
+  "licenses": ["repository-test-data"],
+  "pii_review": "passed",
+  "known_limitations": [
+    "The built-in dataset validates the isolated QA vertical slice; schema recovery and DBA release gates require separately registered datasets."
+  ]
+}

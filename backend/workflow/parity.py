@@ -53,7 +53,7 @@ def parity_diff(left: dict[str, Any], right: dict[str, Any]) -> dict[str, dict[s
 
 def _stage_identity(value: str) -> str:
     parts = value.rsplit(":", 1)
-    if len(parts) == 2 and parts[1] in {"success", "partial", "degraded", "blocked", "error", "cancelled"}:
+    if len(parts) == 2 and parts[1] in {"completed", "success", "partial", "degraded", "blocked", "failed", "error", "canceled", "cancelled"}:
         return parts[0]
     return value
 

@@ -223,6 +223,7 @@ class HybridWorkerResult(StrictContract):
     relation_ids: list[str] = Field(default_factory=list)
     tool_call_ids: list[str] = Field(default_factory=list)
     model_call_ids: list[str] = Field(default_factory=list)
+    used_memory_ids: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     uncertainties: list[str] = Field(default_factory=list)
     missing_capabilities: list[str] = Field(default_factory=list)

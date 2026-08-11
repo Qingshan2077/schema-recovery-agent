@@ -1,0 +1,4 @@
+{
+  "cases_file": "cases.jsonl",
+  "case_ids": ["qa-public-users-metadata", "qa-public-schema-overview"]
+}

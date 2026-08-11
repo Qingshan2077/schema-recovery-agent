@@ -13,3 +13,9 @@ jobs:
           MODEL_PROVIDER_MODE: fake
           EVAL_V2_ENABLED: "true"
           CI_GATE_ENFORCED: "true"
+      - run: python scripts/eval/run_eval.py --mode pr_smoke --split dev
+        env:
+          MODEL_PROVIDER_MODE: fake
+          EVAL_V2_ENABLED: "true"
+          DEPLOYMENT_GIT_SHA: ${{ github.sha }}
+          DEPLOYMENT_DIRTY_WORKTREE: "false"

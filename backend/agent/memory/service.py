@@ -205,7 +205,47 @@ class MemoryService:
                         json_text(item.evidence_ids), item.verified_at.isoformat(),
                     ),
                 )
+        self._apply_verification_outcomes(package, results)
         return results
+
+    def _apply_verification_outcomes(
+        self,
+        package: MemoryContextPackage,
+        results: list[MemoryVerification],
+    ) -> None:
+        """Append lifecycle versions; never rewrite or silently reuse stale memory."""
+        for verification in results:
+            if verification.outcome == "insufficient":
+                continue
+            try:
+                current = self.l2.get(verification.memory_id)
+            except MemoryItemNotFound:
+                continue
+            if current.version != verification.memory_version:
+                continue
+            status = (
+                "stale" if verification.outcome == "stale"
+                else "rejected" if verification.outcome == "rejected"
+                else current.status
+            )
+            namespace = current.namespace
+            last_verified_snapshot_id = current.last_verified_snapshot_id
+            if verification.outcome == "verified":
+                namespace = package.namespace.model_copy(update={
+                    "thread_id": None,
+                    "run_id": None,
+                })
+                last_verified_snapshot_id = verification.snapshot_id
+            updated = current.model_copy(update={
+                "version": current.version + 1,
+                "namespace": namespace,
+                "status": status,
+                "last_verified_snapshot_id": last_verified_snapshot_id,
+                "created_by_run_id": verification.run_id,
+                "created_at": verification.verified_at,
+                "summary": f"{verification.outcome}: {current.summary}",
+            })
+            self.l2.append(updated)
 
     def consolidate_relation(
         self,
@@ -282,6 +322,55 @@ class MemoryService:
                 ),
             )
         return feedback_id
+
+    def propose_from_feedback(
+        self,
+        memory_id: str,
+        *,
+        version: int,
+        feedback: MemoryFeedback,
+    ) -> PromotionProposal | None:
+        """Create a review-only L3 candidate from an explicit human decision.
+
+        Nothing is activated here.  The separate promotion resolution endpoint is
+        the required second step, which prevents self-generated conclusions from
+        becoming global priors.
+        """
+        if feedback.action not in {"accept", "correct"}:
+            return None
+        if feedback.actor_role not in {"schema_reviewer", "data_owner", "admin"}:
+            raise PermissionError("global_memory_proposal_requires_reviewer")
+        requested = dict(feedback.correction.get("global_pattern") or {})
+        if not requested:
+            return None
+        relation = self.l2.get(memory_id, version=version)
+        namespace = relation.namespace
+        now = self.clock.now()
+        global_id = stable_id("memory", "l3", requested, namespace.dialect, namespace.domain)
+        item = GlobalMemoryItem(
+            memory_id=global_id,
+            category=str(requested.get("category") or "relation_pattern"),
+            pattern=dict(requested.get("pattern") or requested),
+            rule_summary=str(requested.get("summary") or relation.summary),
+            scope=list(requested.get("scope") or ["schema_recovery"]),
+            dialects=list(requested.get("dialects") or [namespace.dialect or "any"]),
+            domains=list(requested.get("domains") or [namespace.domain or "any"]),
+            source="human",
+            lifecycle="candidate",
+            confidence=relation.calibrated_probability,
+            support_project_count=1,
+            support_eval_ids=[],
+            version=1,
+            effective_from=now,
+            expires_at=now + timedelta(days=60),
+            created_by_run_id=relation.created_by_run_id,
+        )
+        return self.propose_global(
+            item,
+            namespace=namespace,
+            support_project_ids=[namespace.canonical_project_id],
+            support_eval_ids=[],
+        )
 
     def forget(self, memory_id: str, *, actor_id: str, reason: str) -> str:
         item = self.l2.get(memory_id)

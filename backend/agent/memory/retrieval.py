@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 from typing import Protocol
 
 from backend.agent.memory.contracts import (
@@ -57,16 +58,23 @@ class MemoryRetriever:
         vector_scores: dict[str, float] = {}
         degraded: list[str] = []
         if self.vector_enabled:
-            if self.vector is None:
-                degraded.append("vector_provider_unavailable")
-            else:
+            if self.vector is not None:
                 vector_scores = self.vector.search(query)
 
         candidates: list[MemoryContextItem] = []
+        query_text = " ".join([query.query_text, *query.object_ids])
         for item, method, score in l2_matches:
-            candidates.append(self._l2_item(item, method, max(score, vector_scores.get(item.memory_id, 0.0))))
+            vector_score = vector_scores.get(item.memory_id)
+            if self.vector_enabled and vector_score is None:
+                vector_score = _local_vector_similarity(query_text, item.summary)
+            final_score = max(score, vector_score or 0.0)
+            candidates.append(self._l2_item(item, "vector" if final_score > score else method, final_score))
         for item, method, score in l3_matches:
-            candidates.append(self._l3_item(item, method, max(score, vector_scores.get(item.memory_id, 0.0))))
+            vector_score = vector_scores.get(item.memory_id)
+            if self.vector_enabled and vector_score is None:
+                vector_score = _local_vector_similarity(query_text, item.rule_summary)
+            final_score = max(score, vector_score or 0.0)
+            candidates.append(self._l3_item(item, "vector" if final_score > score else method, final_score))
         candidates.sort(key=lambda item: (-item.retrieval_score, item.layer, item.memory_id))
 
         selected: list[MemoryContextItem] = []
@@ -156,3 +164,31 @@ def _tokens(value: str) -> int:
 
 def _increment(values: dict[str, int], key: str) -> None:
     values[key] = values.get(key, 0) + 1
+
+
+def _local_vector_similarity(left: str, right: str, *, dimensions: int = 128) -> float:
+    """Deterministic hashed character n-gram cosine fallback.
+
+    It is intentionally local and data-free: deployments can inject an embedding
+    provider, while the default advanced path still provides semantic-ish fuzzy
+    retrieval without silently disabling the vector leg.
+    """
+    def vector(value: str) -> list[float]:
+        normalized = " ".join(value.casefold().split())
+        if not normalized:
+            return [0.0] * dimensions
+        grams = [normalized[index:index + 3] for index in range(max(1, len(normalized) - 2))]
+        result = [0.0] * dimensions
+        for gram in grams:
+            digest = hashlib.sha256(gram.encode("utf-8")).digest()
+            bucket = int.from_bytes(digest[:2], "big") % dimensions
+            result[bucket] += -1.0 if digest[2] & 1 else 1.0
+        return result
+
+    a, b = vector(left), vector(right)
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    if not norm_a or not norm_b:
+        return 0.0
+    return max(0.0, min(1.0, dot / (norm_a * norm_b)))

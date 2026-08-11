@@ -3,19 +3,37 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.agent.memory.contracts import MemoryNamespace
 from backend.config import Config
+from backend.core.identity import stable_id
+from backend.evidence.contracts import EvidenceItem, HumanFeedback
+from backend.evidence.fusion import VersionedFusionEngine
+from backend.evidence.policy_loader import load_fusion_policy
+
+
+class RelationFeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    previous_version: int = Field(ge=1)
+    action: str
+    actor_id: str
+    actor_role: str
+    reason: str = Field(min_length=1, max_length=2000)
+    correction: dict[str, Any] = Field(default_factory=dict)
+    run_id: str
+    trace_id: str
 
 
 def create_evidence_router(repository_provider: Callable[[], Any]) -> APIRouter:
     router = APIRouter(prefix="/api/evidence-ledger", tags=["evidence-ledger"])
 
     def repository() -> Any:
-        if not Config.MEMORY_INSPECTOR_ENABLED:
-            raise HTTPException(status_code=404, detail="memory_inspector_disabled")
+        if not Config.EVIDENCE_LEDGER_ENABLED:
+            raise HTTPException(status_code=404, detail="evidence_ledger_disabled")
         return repository_provider()
 
     @router.get("/evidence")
@@ -64,6 +82,71 @@ def create_evidence_router(repository_provider: Callable[[], Any]) -> APIRouter:
             raise HTTPException(status_code=404, detail="relation_not_found") from exc
         _assert_namespace(item.namespace)
         return item.model_dump(mode="json")
+
+    @router.get("/relations/{relation_id}/versions")
+    async def list_relation_versions(
+        relation_id: str,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        try:
+            items = repository().list_relation_versions(relation_id, limit=limit)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="relation_not_found") from exc
+        for item in items:
+            _assert_namespace(item.namespace)
+        return {"items": [item.model_dump(mode="json") for item in items]}
+
+    @router.post("/relations/{relation_id}/feedback")
+    async def relation_feedback(relation_id: str, request: RelationFeedbackRequest) -> dict[str, Any]:
+        if request.actor_role not in {"schema_reviewer", "data_owner", "admin"}:
+            raise HTTPException(status_code=403, detail="relation_feedback_requires_reviewer")
+        if request.action not in {"accept", "reject", "correct_target", "correct_cardinality", "mark_stale", "comment", "undo"}:
+            raise HTTPException(status_code=400, detail="unsupported_feedback_action")
+        repo = repository()
+        current = repo.get_relation(relation_id)
+        _assert_namespace(current.namespace)
+        if current.version != request.previous_version:
+            raise HTTPException(status_code=409, detail="relation_version_conflict")
+        now = datetime.now(timezone.utc)
+        feedback_id = stable_id("feedback", relation_id, request.previous_version, request.actor_id, request.action, request.reason)
+        evidence_id = stable_id("evidence", feedback_id)
+        polarity = "support" if request.action in {"accept", "correct_target", "correct_cardinality"} else "oppose" if request.action in {"reject", "mark_stale"} else "neutral"
+        evidence = EvidenceItem(
+            evidence_id=evidence_id, namespace=current.namespace,
+            snapshot_id=current.namespace.snapshot_id or "", claim_key=current.claim_key,
+            relation_id=relation_id, source_type="human", producer="relation_feedback",
+            producer_version="1.0", polarity=polarity, strength=1.0, reliability=1.0,
+            source_uri=None, source_locator={"actor_id": request.actor_id, "actor_role": request.actor_role},
+            summary=request.reason, root_fact_id=stable_id("fact", feedback_id),
+            correlation_group=f"human:{feedback_id}", trace_id=request.trace_id,
+            span_id=stable_id("span", request.trace_id, feedback_id), created_by_run_id=request.run_id,
+            created_at=now,
+        )
+        repo.append_evidence(evidence)
+        feedback = HumanFeedback(
+            feedback_id=feedback_id, relation_id=relation_id,
+            previous_version=request.previous_version, action=request.action,
+            actor_id=request.actor_id, actor_role=request.actor_role,
+            reason=request.reason, correction=request.correction,
+            trace_id=request.trace_id, created_at=now,
+        )
+        repo.append_feedback(feedback, evidence_id)
+        template = current.model_copy(update={
+            "target_table_id": request.correction.get("target_table_id", current.target_table_id),
+            "target_column_ids": request.correction.get("target_column_ids", current.target_column_ids),
+            "cardinality": request.correction.get("cardinality", current.cardinality),
+            "evidence_ids": [*current.evidence_ids, evidence_id],
+        })
+        policy = load_fusion_policy(Config.FUSION_POLICY_PATH, calibration_enabled=Config.CALIBRATION_ENABLED, feature_schema_path=Config.FUSION_FEATURE_SCHEMA_PATH)
+        fused = VersionedFusionEngine(
+            fusion_version=policy.fusion_version, feature_schema_hash=policy.feature_schema_hash,
+            threshold_policy=policy.threshold_policy, calibrator=policy.calibrator,
+            coefficients=policy.coefficients, prior_probability=policy.prior_probability,
+        ).fuse(template, repo.query_evidence(relation_id=relation_id), version=current.version + 1, run_id=request.run_id, now=now)
+        status_by_action = {"accept": "accepted", "reject": "rejected", "correct_target": "corrected", "correct_cardinality": "corrected", "mark_stale": "stale"}
+        updated = fused.relation.model_copy(update={"status": status_by_action.get(request.action, current.status)})
+        repo.append_relation_version(updated)
+        return {"feedback": feedback.model_dump(mode="json"), "evidence": evidence.model_dump(mode="json"), "relation": updated.model_dump(mode="json")}
 
     @router.get("/calibrations")
     async def list_calibrations(limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:

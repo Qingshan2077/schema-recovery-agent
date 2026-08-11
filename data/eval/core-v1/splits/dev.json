@@ -1,0 +1,4 @@
+{
+  "cases_file": "cases.jsonl",
+  "case_ids": ["qa-dev-products-columns", "qa-dev-orders-indexes"]
+}

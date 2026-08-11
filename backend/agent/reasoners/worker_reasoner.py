@@ -63,7 +63,30 @@ class WorkerReasoner:
             reason = result.error.code if result.error else "reasoner_unavailable"
             return self.deterministic(unit, collector_summary), True, reason
         proposal = self._from_model(unit, result.parsed, result.model_call_id)
-        return proposal, result.status == "degraded", "model_gateway_degraded" if result.status == "degraded" else None
+        allowed_memory_ids = {
+            str(item.get("memory_id"))
+            for item in (memory_context or {}).get("items", [])
+            if item.get("memory_id")
+        }
+        unknown_memory_ids = sorted(set(proposal.used_memory_ids) - allowed_memory_ids)
+        if unknown_memory_ids:
+            proposal = proposal.model_copy(update={
+                "used_memory_ids": [
+                    memory_id for memory_id in proposal.used_memory_ids
+                    if memory_id in allowed_memory_ids
+                ],
+                "uncertainties": [
+                    *proposal.uncertainties,
+                    "unknown_memory_reference_rejected",
+                ],
+            })
+        degraded = result.status == "degraded" or bool(unknown_memory_ids)
+        reason = (
+            "unknown_memory_reference_rejected" if unknown_memory_ids
+            else "model_gateway_degraded" if result.status == "degraded"
+            else None
+        )
+        return proposal, degraded, reason
 
     def deterministic(self, unit: WorkUnit, collector_summary: dict) -> ReasoningProposal:
         candidates = [self._candidate(unit, item) for item in collector_summary.get("candidate_facts", []) if item.get("claim_key")]

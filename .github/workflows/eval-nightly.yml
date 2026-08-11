@@ -13,3 +13,6 @@ jobs:
       - run: python scripts/eval/run_eval.py --mode nightly --split public_test
         env:
           EVAL_V2_ENABLED: "true"
+          MODEL_PROVIDER_MODE: fake
+          DEPLOYMENT_GIT_SHA: ${{ github.sha }}
+          DEPLOYMENT_DIRTY_WORKTREE: "false"

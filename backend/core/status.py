@@ -12,12 +12,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 class RunStatus(str, Enum):
     RUNNING = "running"
-    SUCCESS = "success"
+    SUCCESS = "completed"
     PARTIAL = "partial"
     DEGRADED = "degraded"
     BLOCKED = "blocked"
-    ERROR = "error"
-    CANCELLED = "cancelled"
+    ERROR = "failed"
+    CANCELLED = "canceled"
 
 
 TERMINAL_STATUSES = {
@@ -30,10 +30,14 @@ TERMINAL_STATUSES = {
 }
 
 _LEGACY_STATUS_MAP = {
+    "success": RunStatus.SUCCESS,
     "completed": RunStatus.SUCCESS,
     "complete": RunStatus.SUCCESS,
+    "error": RunStatus.ERROR,
     "failed": RunStatus.ERROR,
     "failure": RunStatus.ERROR,
+    "cancelled": RunStatus.CANCELLED,
+    "canceled": RunStatus.CANCELLED,
 }
 
 _PRIORITY = {
@@ -106,7 +110,7 @@ class AgentRunResult(BaseModel):
     @model_validator(mode="after")
     def validate_status_contract(self) -> "AgentRunResult":
         if self.status == RunStatus.SUCCESS and self.error is not None:
-            raise ValueError("success result cannot contain an error")
+            raise ValueError("completed result cannot contain an error")
         if self.status in {RunStatus.ERROR, RunStatus.BLOCKED, RunStatus.CANCELLED} and self.error is None:
             raise ValueError(f"{self.status.value} result requires an error")
         if self.status == RunStatus.DEGRADED and not (self.uncertainties or self.next_actions or self.error):
@@ -132,6 +136,8 @@ def coerce_worker_status(value: str | None) -> str:
     normalized = (value or "").strip().lower()
     if normalized in {"success", "partial", "degraded", "blocked", "error", "cancelled", "skipped"}:
         return normalized
+    if normalized == "canceled":
+        return "cancelled"
     if normalized in {"completed", "complete"}:
         return "success"
     if normalized in {"failed", "failure"}:
@@ -191,12 +197,12 @@ def validate_terminal_result(
     if canonical in {RunStatus.ERROR, RunStatus.BLOCKED, RunStatus.CANCELLED} and not error:
         raise ValueError(f"{canonical.value} status requires a structured error")
     if canonical == RunStatus.SUCCESS and require_output and not output:
-        raise ValueError("success status requires a core output artifact")
+        raise ValueError("completed status requires a core output artifact")
 
 
 def map_v2_status_to_v1(status: RunStatus | str) -> str:
     canonical = coerce_run_status(status)
-    return "completed" if canonical == RunStatus.SUCCESS else canonical.value
+    return canonical.value
 
 
 def normalize_legacy_result(result: Mapping[str, Any]) -> AgentRunResult:

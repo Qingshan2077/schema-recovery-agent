@@ -13,3 +13,8 @@ jobs:
         env:
           EVAL_V2_ENABLED: "true"
           CI_GATE_ENFORCED: "true"
+          EVAL_DATASET_ID: ${{ vars.EVAL_HIDDEN_DATASET_ID }}
+          EVAL_DATASET_VERSION: ${{ vars.EVAL_HIDDEN_DATASET_VERSION }}
+          EVAL_CASE_EXECUTOR: ${{ vars.EVAL_HIDDEN_CASE_EXECUTOR }}
+          DEPLOYMENT_GIT_SHA: ${{ github.sha }}
+          DEPLOYMENT_DIRTY_WORKTREE: "false"

@@ -76,13 +76,14 @@ class EvalRunManifest(StrictContract):
 class EvalRunRecord(StrictContract):
     eval_run_id: str
     manifest_hash: str
-    status: Literal["queued", "running", "completed", "failed", "cancelled", "incomplete"]
+    status: Literal["queued", "running", "completed", "failed", "canceled"]
     sequence: int = Field(default=0, ge=0)
     total_cases: int = Field(ge=0)
     completed_cases: int = Field(default=0, ge=0)
     failed_cases: int = Field(default=0, ge=0)
     trace_complete: bool = True
     qualitative_complete: bool = True
+    failure_reason: str | None = None
     started_at: datetime
     finalized_at: datetime | None = None
     finalization_hash: str | None = None

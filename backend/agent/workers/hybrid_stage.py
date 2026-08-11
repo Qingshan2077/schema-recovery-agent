@@ -112,6 +112,11 @@ class HybridRecoveryStage:
             )
             model_call_ids.extend(proposal.model_call_ids)
             uncertainties.extend(proposal.uncertainties)
+            if proposal.used_memory_ids:
+                await _emit(
+                    runtime_context, "memory.used", "success", span_id, unit,
+                    {"memory_ids": proposal.used_memory_ids},
+                )
             if degradation_reason:
                 uncertainties.append(degradation_reason)
             missing.extend(collected.missing_capabilities)
@@ -188,6 +193,7 @@ class HybridRecoveryStage:
                 "evidence_ids": list(dict.fromkeys(evidence_ids)),
                 "relation_ids": list(dict.fromkeys(relation_ids)),
                 "model_call_ids": model_call_ids,
+                "used_memory_ids": proposal.used_memory_ids,
                 "ledger_revision": revision,
                 "evidence_requests": pending_requests,
                 "missing_capabilities": list(dict.fromkeys(missing)),
@@ -207,6 +213,7 @@ class HybridRecoveryStage:
                 relation_ids=relation_ids,
                 tool_call_ids=collected.tool_call_ids,
                 model_call_ids=model_call_ids,
+                used_memory_ids=proposal.used_memory_ids,
                 assumptions=proposal.assumptions,
                 uncertainties=list(dict.fromkeys(uncertainties)),
                 missing_capabilities=list(dict.fromkeys(missing)),
@@ -647,16 +654,20 @@ def _fuse_versioned(
     from types import SimpleNamespace
 
     from backend.evidence.bridge import namespace_from_context, relation_template, upgrade_evidence
-    from backend.evidence.contracts import ThresholdPolicy
     from backend.evidence.fusion import VersionedFusionEngine
+    from backend.evidence.policy_loader import load_fusion_policy
 
     namespace = namespace_from_context(context, unit.snapshot_id, unit.run_id)
     upgraded = [
         upgrade_evidence(item, namespace=namespace, run_id=unit.run_id)
         for item in evidence
     ]
-    feature_hash = "phase5-feature-schema-v1"
-    thresholds = ThresholdPolicy(version="phase5-threshold-v1", high=0.70, medium=0.40)
+    policy = load_fusion_policy(
+        Config.FUSION_POLICY_PATH,
+        calibration_enabled=Config.CALIBRATION_ENABLED,
+        feature_schema_path=Config.FUSION_FEATURE_SCHEMA_PATH,
+    )
+    feature_hash = policy.feature_schema_hash
     existing = None
     if repository is not None:
         try:
@@ -665,9 +676,12 @@ def _fuse_versioned(
             existing = None
     relation_version = 1 if existing is None else existing.version + 1
     fusion = VersionedFusionEngine(
-        fusion_version="log_odds_v3",
+        fusion_version=policy.fusion_version,
         feature_schema_hash=feature_hash,
-        threshold_policy=thresholds,
+        threshold_policy=policy.threshold_policy,
+        calibrator=policy.calibrator,
+        coefficients=policy.coefficients,
+        prior_probability=policy.prior_probability,
     ).fuse(
         relation_template(
             candidate, namespace=namespace, run_id=unit.run_id,
@@ -692,7 +706,7 @@ def _fuse_versioned(
     breakdown = {
         "model_version": fusion.relation.fusion_version,
         "weight_version": fusion.relation.feature_schema_hash,
-        "prior_probability": 0.18,
+        "prior_probability": policy.prior_probability,
         "prior_log_odds": 0.0,
         "contributions": [item.model_dump(mode="json") for item in fusion.relation.contribution_breakdown],
         "hard_constraint_adjustment": sum(

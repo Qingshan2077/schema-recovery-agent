@@ -303,7 +303,7 @@ class ManualEngine:
                     source=unit.worker,
                 ),
             )
-        if existing and existing.status in {"success", "degraded", "partial"} and existing.output_ref:
+        if existing and existing.status in {"completed", "success", "degraded", "partial"} and existing.output_ref:
             payload = self.runs.get_json(existing.output_ref)
             if payload is None:
                 return StageResult(

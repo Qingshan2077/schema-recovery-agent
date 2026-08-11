@@ -20,12 +20,17 @@ def create_eval_v2_router(provider: Callable[[], Any]) -> APIRouter:
     @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
     async def create_run(request: EvalCreateRequest, background: BackgroundTasks, response: Response) -> dict[str, Any]:
         try:
-            record, cases = service().create(request, versions=_versions(), git_sha=Config.DEPLOYMENT_GIT_SHA, dirty_worktree=Config.DEPLOYMENT_DIRTY_WORKTREE)
+            evaluator = service()
+            record, cases = evaluator.create(request, versions=_versions(evaluator), git_sha=Config.DEPLOYMENT_GIT_SHA, dirty_worktree=Config.DEPLOYMENT_DIRTY_WORKTREE)
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         background.add_task(service().execute, record.eval_run_id, cases)
         response.headers["Location"] = f"/api/v2/evals/runs/{record.eval_run_id}"
         return record.model_dump(mode="json")
+
+    @router.get("/datasets")
+    async def datasets() -> dict[str, Any]:
+        return {"items": service().registry.list()}
 
     @router.get("/runs/{eval_run_id}")
     async def get_run(eval_run_id: str) -> dict[str, Any]:
@@ -63,12 +68,23 @@ def create_eval_v2_router(provider: Callable[[], Any]) -> APIRouter:
     return router
 
 
-def _versions() -> dict[str, Any]:
+def _versions(evaluator: Any) -> dict[str, Any]:
+    from backend.evidence.policy_loader import load_fusion_policy
+    fusion = load_fusion_policy(
+        Config.FUSION_POLICY_PATH,
+        calibration_enabled=Config.CALIBRATION_ENABLED,
+        feature_schema_path=Config.FUSION_FEATURE_SCHEMA_PATH,
+    )
     return {
-        "model_profiles": {"fast": Config.MODEL_FAST, "reasoning": Config.MODEL_REASONING, "judge": Config.MODEL_JUDGE},
-        "fusion_version": Config.FUSION_MODEL_VERSION,
-        "calibration_version": "configured",
-        "threshold_policy_version": "configured",
+        **evaluator.runtime_versions(),
+        "fusion_version": fusion.fusion_version,
+        "calibration_version": fusion.calibrator.version,
+        "threshold_policy_version": fusion.threshold_policy.version,
         "memory_mode": "isolated",
-        "runtime_config": {"engine": Config.RECOVERY_ENGINE, "workflow": Config.WORKFLOW_VERSION},
+        "runtime_config": {
+            "engine": Config.RECOVERY_ENGINE,
+            "workflow": Config.WORKFLOW_VERSION,
+            "state_schema": Config.STATE_SCHEMA_VERSION,
+            "tool_policy": Config.TOOL_RUNTIME_ENFORCEMENT,
+        },
     }

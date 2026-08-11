@@ -121,6 +121,19 @@ class PromptRegistry:
         if duplicates:
             raise PromptRegistryError(f"Prompt ids must have one active version: {', '.join(sorted(duplicates))}")
 
+    def public_inventory(self) -> list[dict[str, str]]:
+        inventory = []
+        for entry in sorted(self._entries, key=lambda item: (item.prompt_id, item.semantic_version)):
+            if entry.status != "active":
+                continue
+            self._verify_entry(entry)
+            inventory.append({
+                "prompt_id": entry.prompt_id,
+                "version": entry.semantic_version,
+                "sha256": entry.sha256,
+            })
+        return inventory
+
     def _load_registry(self) -> list[PromptSnapshot]:
         try:
             raw = json.loads(self.registry_path.read_text(encoding="utf-8"))

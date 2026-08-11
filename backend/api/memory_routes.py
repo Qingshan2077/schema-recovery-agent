@@ -90,7 +90,7 @@ def create_memory_router(service_provider: Callable[[], Any]) -> APIRouter:
             raise HTTPException(status_code=404, detail="memory_not_found") from exc
 
     @router.post("/{memory_id}/feedback")
-    async def feedback(memory_id: str, request: FeedbackRequest) -> dict[str, str]:
+    async def feedback(memory_id: str, request: FeedbackRequest) -> dict[str, Any]:
         item = enabled().get_memory(memory_id)
         _assert_active_namespace(item)
         feedback_id = enabled().submit_feedback(
@@ -98,7 +98,15 @@ def create_memory_router(service_provider: Callable[[], Any]) -> APIRouter:
             version=request.version,
             feedback=MemoryFeedback(**request.model_dump(exclude={"version"})),
         )
-        return {"feedback_id": feedback_id}
+        proposal = enabled().propose_from_feedback(
+            memory_id,
+            version=request.version,
+            feedback=MemoryFeedback(**request.model_dump(exclude={"version"})),
+        )
+        return {
+            "feedback_id": feedback_id,
+            "promotion_proposal": proposal.model_dump(mode="json") if proposal else None,
+        }
 
     @router.post("/{memory_id}/forget")
     async def forget(memory_id: str, request: ForgetRequest) -> dict[str, str]:

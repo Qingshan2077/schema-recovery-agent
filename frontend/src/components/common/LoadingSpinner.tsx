@@ -52,7 +52,7 @@ function ProgressStep({ item, step, started }: { item: { worker: string; labelKe
     <div className={`loading-step ${statusClass}`}>
       {isSkipped ? <MinusCircle size={16} /> : isDone ? <Check size={16} /> : started ? <LoaderCircle className="spin" size={16} /> : <Clock size={16} />}
       <span>{t(item.labelKey)}</span>
-      {step ? <small>{step.status === "success" ? `${step.duration_ms} ms / ${toolCallCount} ${t("tools")}` : step.status}</small> : started ? <small>{t("running")}</small> : null}
+      {step ? <small>{["success", "completed"].includes(step.status) ? `${step.duration_ms} ms / ${toolCallCount} ${t("tools")}` : step.status}</small> : started ? <small>{t("running")}</small> : null}
     </div>
   );
 }

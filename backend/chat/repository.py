@@ -162,8 +162,8 @@ class SQLiteChatRepository:
                     ),
                 )
             terminal_type = (
-                "run.completed" if status in {"success", "degraded", "partial"}
-                else "run.cancelled" if status == "cancelled"
+                "run.completed" if status in {"completed", "degraded", "partial"}
+                else "run.canceled" if status == "canceled"
                 else "run.failed"
             )
             self._append_event_tx(connection, run["thread_id"], run_id, terminal_type, status, {"message_id": assistant_id, "result": output, "error": result.get("error")})

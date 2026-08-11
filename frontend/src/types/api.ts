@@ -1,5 +1,5 @@
 export type ConfidenceLevel = "all" | "high" | "medium" | "low";
-export type RunStatus = "running" | "success" | "partial" | "degraded" | "blocked" | "error" | "cancelled";
+export type RunStatus = "queued" | "running" | "waiting_approval" | "partial" | "degraded" | "blocked" | "failed" | "canceled" | "completed" | "expired";
 
 export interface EvidenceChainItem {
   evidence_id?: string;
@@ -112,7 +112,7 @@ export interface AnalysisResult {
   thread_id?: string;
   parent_run_id?: string;
   attempt?: number;
-  status: RunStatus | "completed";
+  status: RunStatus;
   run_status: RunStatus;
   snapshot_id?: string;
   database_fingerprint?: string;

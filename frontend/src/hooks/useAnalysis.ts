@@ -163,7 +163,10 @@ function applyStreamEvent(
   }
 
   if (event.type === "complete" && event.data) {
-    setState({ data: event.data, loading: false, progress: undefined });
+    const terminalError = ["failed", "blocked", "canceled", "expired"].includes(event.data.run_status)
+      ? `${event.data.error ?? `analysis ${event.data.run_status}`} [run_id=${event.data.run_id}]`
+      : undefined;
+    setState({ data: event.data, loading: false, progress: undefined, error: terminalError });
     return event.data;
   }
   return undefined;
@@ -174,7 +177,7 @@ async function fetchExistingRun(runId: string): Promise<AnalysisResult> {
   if (!response.ok) throw new Error(`${ANALYSIS_ERROR_KEY}: unable to recover run ${runId}`);
   const record = (await response.json()) as RunRecordResponse;
   if (record.result) {
-    if (record.result.run_status === "error") {
+    if (record.result.run_status === "failed") {
       throw new Error(`${record.result.error ?? ANALYSIS_ERROR_KEY} [run_id=${runId}]`);
     }
     return record.result;

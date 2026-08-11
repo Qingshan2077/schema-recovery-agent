@@ -268,6 +268,17 @@ class SQLiteVersionedEvidenceRepository:
             ).fetchall()
         return [RelationCandidateVersion.model_validate_json(row["payload_json"]) for row in rows]
 
+    def list_relation_versions(self, relation_id: str, *, limit: int = 100) -> list[RelationCandidateVersion]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT payload_json FROM relation_versions
+                   WHERE relation_id=? ORDER BY version DESC LIMIT ?""",
+                (relation_id, limit),
+            ).fetchall()
+        if not rows:
+            raise VersionedEvidenceNotFound(relation_id)
+        return [RelationCandidateVersion.model_validate_json(row["payload_json"]) for row in rows]
+
     def append_feedback(self, item: HumanFeedback, evidence_id: str) -> HumanFeedback:
         payload = item.model_dump(mode="json")
         with self._transaction() as connection:

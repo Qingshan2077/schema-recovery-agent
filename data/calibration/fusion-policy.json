@@ -1,6 +1,7 @@
 {
   "fusion_version": "log_odds_v3",
   "feature_schema_hash": "phase5-feature-schema-v1",
+  "prior_probability": 0.18,
   "threshold_policy": {
     "version": "phase5-threshold-v1",
     "high": 0.70,
@@ -9,7 +10,36 @@
     "single_root_high_forbidden": true
   },
   "calibration": {
-    "version": "identity-v1",
+    "version": "platt-bootstrap-v1",
+    "algorithm": "platt",
+    "parameters": {
+      "slope": 1.0,
+      "intercept": 0.0
+    },
+    "dataset_version": "bootstrap-policy-unvalidated",
+    "validated": false,
+    "created_at": "2026-08-11T00:00:00Z",
+    "git_sha": "policy-bootstrap-v1",
     "online_training_forbidden": true
+  },
+  "coefficients": {
+    "support_catalog": 0.8,
+    "oppose_catalog": -0.9,
+    "support_column_profile": 1.2,
+    "oppose_column_profile": -1.3,
+    "support_name_semantics": 0.65,
+    "oppose_name_semantics": -0.75,
+    "support_sql_ast": 1.45,
+    "oppose_sql_ast": -1.6,
+    "support_sql_llm": 0.55,
+    "oppose_sql_llm": -0.65,
+    "support_orm": 1.25,
+    "oppose_orm": -1.4,
+    "support_memory": 0.35,
+    "oppose_memory": -0.4,
+    "support_human": 2.0,
+    "oppose_human": -2.2,
+    "synergy_multi_source": 0.35,
+    "conflict_root_count": -0.9
   }
 }

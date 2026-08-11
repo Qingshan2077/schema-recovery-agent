@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from threading import RLock
 
 from backend.agent.qa.agent import QAAgent
@@ -10,12 +11,13 @@ from backend.agent.runtime.contracts import RuntimeEvent
 from backend.agent.runtime.run_context import CancellationToken
 from backend.chat.contracts import QARunRecord, StartedRun
 from backend.chat.repository import SQLiteChatRepository
-from backend.core.identity import RunIdentity
+from backend.core.identity import RunIdentity, new_id
 
 
 class ChatEventSink:
-    def __init__(self, repository: SQLiteChatRepository):
+    def __init__(self, repository: SQLiteChatRepository, traces: object | None = None):
         self.repository = repository
+        self.traces = traces
 
     async def emit(self, event: RuntimeEvent) -> None:
         if event.thread_id is None:
@@ -27,13 +29,16 @@ class ChatEventSink:
             status=event.status,
             payload=event.model_dump(mode="json"),
         )
+        if self.traces is not None:
+            self.traces.record_event(event)
 
 
 class ChatService:
-    def __init__(self, *, repository: SQLiteChatRepository, qa_agent: QAAgent, runtime: RuntimeContainer):
+    def __init__(self, *, repository: SQLiteChatRepository, qa_agent: QAAgent, runtime: RuntimeContainer, traces: object | None = None):
         self.repository = repository
         self.qa_agent = qa_agent
         self.runtime = runtime
+        self.traces = traces
         self._tokens: dict[str, CancellationToken] = {}
         self._lock = RLock()
 
@@ -66,17 +71,35 @@ class ChatService:
             context = self.runtime.new_context(
                 identity,
                 agent_id="qa",
-                event_sink=ChatEventSink(self.repository),
+                event_sink=ChatEventSink(self.repository, self.traces),
                 cancellation=token,
             )
             async def emit_qa_event(event_type: str, status: str, payload: dict) -> None:
-                self.repository.append_event(
+                persisted = self.repository.append_event(
                     thread_id=started.thread_id,
                     run_id=started.run_id,
                     event_type=event_type,
                     status=status,
                     payload=payload,
                 )
+                if self.traces is not None:
+                    self.traces.record_event(RuntimeEvent(
+                        event_id=persisted.event_id,
+                        sequence=persisted.sequence,
+                        timestamp=datetime.now(timezone.utc),
+                        thread_id=started.thread_id,
+                        run_id=started.run_id,
+                        trace_id=started.trace_id,
+                        span_id=new_id("span"),
+                        parent_span_id=None,
+                        agent_id="qa",
+                        attempt=1,
+                        event_type=event_type,
+                        status=status,
+                        payload=payload,
+                        usage=context.budget.snapshot(),
+                        redaction={"level": context.redaction_policy.level},
+                    ))
             thread = self.repository.get_thread(started.thread_id, owner_id=owner_id)
             messages = []
             question = ""
