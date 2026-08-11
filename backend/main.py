@@ -20,6 +20,9 @@ from backend.api.v2 import create_chat_router
 from backend.api.run_routes import create_run_router
 from backend.api.memory_routes import create_memory_router
 from backend.api.evidence_routes import create_evidence_router
+from backend.api.eval_v2_routes import create_eval_v2_router
+from backend.api.trace_routes import create_trace_router
+from backend.api.dba_routes import create_dba_router
 from backend.config import Config
 from backend.core.identity import RunIdentity
 from backend.core.legacy_ids import LegacyIdStore
@@ -38,6 +41,9 @@ app.include_router(create_chat_router(lambda: _chat_service()))
 app.include_router(create_run_router(lambda: _recovery_run_service()))
 app.include_router(create_memory_router(lambda: _memory_service()))
 app.include_router(create_evidence_router(lambda: _versioned_evidence_repository()))
+app.include_router(create_eval_v2_router(lambda: _eval_service()))
+app.include_router(create_trace_router(lambda: _trace_recorder()))
+app.include_router(create_dba_router(lambda: _dba_service()))
 
 
 @app.on_event("startup")
@@ -45,6 +51,14 @@ async def startup() -> None:
     from backend.agent.memory.global_memory import GlobalMemory
     from backend.agent.memory.service import MemoryService
     from backend.evidence.versioned_repository import SQLiteVersionedEvidenceRepository
+    from backend.eval_v2.artifacts import EvalArtifactStore
+    from backend.eval_v2.registry import DatasetRegistry
+    from backend.eval_v2.service import EvalService
+    from backend.eval_v2.store import EvalStore
+    from backend.observability.tracing import TraceRecorder
+    from backend.agent.dba.operation_store import OperationStore
+    from backend.agent.dba.planner import DDLPlanner
+    from backend.agent.dba.service import DBAService
     from backend.mcp.server import init_mcp_tools
 
     app.state.runtime = build_runtime_container(Config)
@@ -56,6 +70,20 @@ async def startup() -> None:
     )
     app.state.versioned_evidence_repository = SQLiteVersionedEvidenceRepository(
         Config.EVIDENCE_DB_PATH,
+    )
+    app.state.trace_recorder = TraceRecorder(Config.TRACE_DB_PATH)
+    app.state.eval_service = EvalService(
+        registry=DatasetRegistry(Config.EVAL_DATASET_REGISTRY_PATH),
+        store=EvalStore(Config.EVAL_V2_DB_PATH),
+        artifacts=EvalArtifactStore(Config.EVAL_ARTIFACT_DIR),
+        traces=app.state.trace_recorder,
+    )
+    app.state.dba_service = DBAService(
+        store=OperationStore(Config.DBA_OPERATION_DB_PATH),
+        planner=DDLPlanner(), traces=app.state.trace_recorder,
+        execution_enabled=Config.DBA_EXECUTION_ENABLED,
+        connection_allowlist=Config.DBA_EXECUTION_CONNECTION_ALLOWLIST,
+        ttl_minutes=Config.DBA_OPERATION_TTL_MINUTES,
     )
     from backend.persistence import SQLiteEventLog, SQLiteRunRepository
     from backend.services import RecoveryRunService, build_engine_factory, preflight_recovery_persistence
@@ -200,6 +228,40 @@ async def chat(request: ChatRequest) -> dict[str, Any]:
     }
 
     if intent == "ddl":
+        if Config.DBA_V2_ENABLED and request.pending_operation:
+            return _finish_chat(identity, {
+                "type": "error", "session_id": thread_id, **identity.model_dump(),
+                "message": "客户端确认载荷已停用，请在 Approval Center 审批服务端 operation。",
+                "code": "approval_protocol_required",
+            }, RunStatus.BLOCKED)
+        if Config.DBA_V2_ENABLED and not any(value in request.message.lower() for value in ("show create", "建表语句")):
+            from backend.agent.dba.contracts import ActorContext
+
+            try:
+                operation = await _dba_service().create_operation(
+                    request.message,
+                    actor=ActorContext(
+                        actor_id="local-analyst", roles=["analyst"],
+                        tenant_id=Config.TENANT_ID, project_id=Config.PROJECT_ID,
+                        environment="dev", capabilities=["dba_plan", "dba_view_sql"],
+                    ),
+                    connection_id=f"{Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}",
+                    thread_id=thread_id, run_id=identity.run_id, dialect="mysql",
+                    snapshot_id="snp_pending", snapshot_hash="sha256:pending",
+                )
+                return _finish_chat(identity, {
+                    "type": "approval", "session_id": thread_id, **identity.model_dump(),
+                    "message": "DDL 计划已保存到服务端，需在 Approval Center 审批。",
+                    "operation_id": operation.operation_id,
+                    "operation_version": operation.version,
+                    "operation_hash": operation.normalized_sql_hash,
+                    "status": operation.status,
+                }, RunStatus.BLOCKED)
+            except ValueError as exc:
+                return _finish_chat(identity, {
+                    "type": "error", "session_id": thread_id, **identity.model_dump(),
+                    "message": str(exc), "code": "unsupported_ddl",
+                }, RunStatus.ERROR)
         worker = DBAWorker(
             app.state.tool_registry,
             run_context=runtime_context.for_agent("dba") if runtime_context else None,
@@ -357,6 +419,24 @@ def _versioned_evidence_repository():
     if repository is None:
         raise HTTPException(status_code=503, detail="evidence_repository_not_ready")
     return repository
+
+
+def _trace_recorder():
+    recorder = getattr(app.state, "trace_recorder", None)
+    if recorder is None: raise HTTPException(status_code=503, detail="trace_recorder_not_ready")
+    return recorder
+
+
+def _eval_service():
+    service = getattr(app.state, "eval_service", None)
+    if service is None: raise HTTPException(status_code=503, detail="eval_service_not_ready")
+    return service
+
+
+def _dba_service():
+    service = getattr(app.state, "dba_service", None)
+    if service is None: raise HTTPException(status_code=503, detail="dba_service_not_ready")
+    return service
 
 
 async def _analysis_stream_v2(run_id: str):
@@ -703,8 +783,9 @@ async def get_weight_suggestions() -> dict[str, Any]:
 
 
 @app.post("/api/eval/run")
-@app.post("/api/v2/evals/runs")
 async def run_evaluation() -> dict[str, Any]:
+    if Config.EVAL_V2_ENABLED:
+        raise HTTPException(status_code=410, detail="use_post_api_v2_evals_runs_with_registered_dataset")
     from backend.eval.report import EvalReporter
 
     return EvalReporter().run_and_save_report()
@@ -712,6 +793,11 @@ async def run_evaluation() -> dict[str, Any]:
 
 @app.get("/api/eval/report")
 async def get_latest_report() -> dict[str, Any]:
+    if Config.EVAL_V2_ENABLED:
+        baseline = _eval_service().store.current_baseline("release")
+        if baseline is None:
+            raise HTTPException(status_code=404, detail="no_finalized_eval_report")
+        return _eval_service().report(str(baseline["eval_run_id"]))
     from backend.eval.report import EvalReporter
 
     report = EvalReporter().get_latest_report()

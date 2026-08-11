@@ -39,6 +39,11 @@ IdKind = Literal[
     "verification",
     "fusion",
     "calibration",
+    "eval_run",
+    "eval_case",
+    "operation",
+    "approval",
+    "audit",
 ]
 
 _PREFIXES: dict[IdKind, str] = {
@@ -71,6 +76,11 @@ _PREFIXES: dict[IdKind, str] = {
     "verification": "ver",
     "fusion": "fus",
     "calibration": "cal",
+    "eval_run": "eval",
+    "eval_case": "case",
+    "operation": "op",
+    "approval": "apr",
+    "audit": "aud",
 }
 
 

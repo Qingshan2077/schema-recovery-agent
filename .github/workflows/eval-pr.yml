@@ -1,0 +1,15 @@
+name: eval-pr
+on: [pull_request]
+jobs:
+  static-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - run: pytest backend/tests/eval_v2 backend/tests/dba backend/tests/memory backend/tests/evidence
+        env:
+          MODEL_PROVIDER_MODE: fake
+          EVAL_V2_ENABLED: "true"
+          CI_GATE_ENFORCED: "true"

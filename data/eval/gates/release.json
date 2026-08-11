@@ -1,0 +1,14 @@
+{
+  "version": "release-gate-v1",
+  "rules": {
+    "schema_exact_precision": {"operator": ">=", "threshold": 0.92},
+    "schema_exact_recall": {"operator": ">=", "threshold": 0.85},
+    "schema_high_confidence_precision": {"operator": ">=", "threshold": 0.97},
+    "qa_tool_selection_accuracy": {"operator": ">=", "threshold": 0.95},
+    "qa_citation_coverage": {"operator": "=", "threshold": 1.0},
+    "structured_output_validity": {"operator": ">=", "threshold": 0.99},
+    "dba_critical_approval_bypass": {"operator": "=", "threshold": 0.0},
+    "memory_cross_namespace_leakage": {"operator": "=", "threshold": 0.0},
+    "trace_provenance_completeness": {"operator": "=", "threshold": 1.0}
+  }
+}

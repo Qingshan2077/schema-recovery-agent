@@ -151,7 +151,7 @@ def _default_tool_allowlists() -> dict[str, set[str]]:
             "evidence.query_relations",
             "analysis.get_status",
         },
-        "dba": {"show_create_table", "execute_ddl"},
+        "dba": {"show_create_table"},
         "survey": {"tool:connect_database", "tool:list_tables", "tool:list_views", "tool:list_stored_procedures", "tool:find_orm_configs", "tool:list_triggers"},
         "column": {"tool:analyze_table_columns", "tool:check_indexes", "tool:check_auto_increment"},
         "name": {"tool:analyze_naming_convention", "tool:find_column_name_matches", "tool:detect_associative_tables"},

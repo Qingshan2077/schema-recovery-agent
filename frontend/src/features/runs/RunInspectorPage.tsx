@@ -1,0 +1,6 @@
+import { useState } from "react";
+import { api } from "../../app/api/client";
+import type { DomainEvent } from "../../types/events";
+import { reduceEvents, useRunStore } from "../../app/stores/runStore";
+
+export function RunInspectorPage() { const [runId, setRunId] = useState(""); const state = useRunStore(); const load = async () => { const value = await api<{ events: DomainEvent[] }>(`/api/runs/${encodeURIComponent(runId)}/events?after_sequence=${state.cursor}`); reduceEvents(value.events); }; return <section><div className="page-heading"><div><h2>Live Run Inspector</h2><p>Cursor-safe Agent, model, tool, memory, approval and fallback events.</p></div></div><div className="inline-form"><input value={runId} onChange={(event) => setRunId(event.target.value)} placeholder="run_id"/><button onClick={() => void load()}>Load events</button></div>{state.gap && <div className="error-banner">Sequence gap: expected {state.gap.expected}, received {state.gap.received}. Reconnect without starting a new run.</div>}<div className="timeline">{state.events.map((event) => <article key={event.sequence}><strong>#{event.sequence} {event.type}</strong><span>{String(event.status ?? "")}</span><code>{String(event.trace_id ?? "")}</code></article>)}</div></section>; }

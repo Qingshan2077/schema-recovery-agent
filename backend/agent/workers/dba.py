@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-from backend.agent.orchestrator import Orchestrator
 from backend.agent.workers.base import BaseWorker
 
 
@@ -34,7 +33,14 @@ class DBAWorker(BaseWorker):
                 "pending_operation": parsed,
             }
 
-        if safety_level in {self.CONFIRM, self.DANGEROUS} and not confirmed:
+        if confirmed or pending:
+            return {
+                "status": "error",
+                "message": "Client-side confirmation is no longer accepted. Create and approve a server-side operation.",
+                "code": "approval_protocol_required",
+            }
+
+        if safety_level in {self.CONFIRM, self.DANGEROUS}:
             prompt = "Dangerous operation requires explicit confirmation" if safety_level == self.DANGEROUS else "Confirm this schema change"
             return {
                 "status": "need_confirmation",
@@ -43,18 +49,10 @@ class DBAWorker(BaseWorker):
                 "safety_level": safety_level,
             }
 
-        self.approve_next_tool_call()
-        result = self.call_tool("execute_ddl", sql=parsed["ddl_statement"])
-        if not result.get("success"):
-            return {"status": "error", "message": f"Execution failed: {result.get('error', 'unknown error')}", "data": result}
-
-        analysis = Orchestrator(self.tool_registry).run_full_analysis()
-        total_relations = analysis.get("merge_result", {}).get("summary", {}).get("total_relations", 0)
         return {
-            "status": "success",
-            "message": f"Operation executed: {parsed.get('summary', parsed['ddl_statement'])}\nRe-analysis finished and found {total_relations} relations.",
-            "ddl_executed": parsed["ddl_statement"],
-            "new_analysis": analysis,
+            "status": "error",
+            "message": "DDL execution requires the server-side approval protocol.",
+            "code": "approval_protocol_required",
         }
 
     def _parse_intent(self, question: str) -> dict:
@@ -62,7 +60,7 @@ class DBAWorker(BaseWorker):
         lower = q.lower()
         table = self._extract_table_name(q)
 
-        if any(keyword in lower for keyword in ["show create", "create table", "\u5efa\u8868\u8bed\u53e5"]):
+        if any(keyword in lower for keyword in ["show create", "\u5efa\u8868\u8bed\u53e5"]):
             return {"intent": "show_create_table", "table_name": table or self._extract_first_identifier(q)}
 
         raw_sql = self._extract_sql(q)

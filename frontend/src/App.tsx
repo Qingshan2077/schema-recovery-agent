@@ -8,9 +8,13 @@ import { ChatPage } from "./pages/ChatPage";
 import { EvalPage } from "./pages/EvalPage";
 import { MonitorPage } from "./pages/MonitorPage";
 import { MemoryInspectorPage } from "./pages/MemoryInspectorPage";
+import { ApprovalCenterPage } from "./features/approvals/ApprovalCenterPage";
+import { RunInspectorPage } from "./features/runs/RunInspectorPage";
+import { EvidenceWorkbenchPage } from "./features/evidence/EvidenceWorkbenchPage";
+import { EvalConsolePage } from "./features/quality/EvalConsolePage";
 import type { SurveyOutput } from "./types/api";
 
-export type PageKey = "analysis" | "chat" | "monitor" | "eval" | "memory";
+export type PageKey = "analysis" | "chat" | "monitor" | "eval" | "memory" | "approvals" | "runs" | "evidence" | "quality";
 
 function getInitialLanguage(): Language {
   const stored = localStorage.getItem("schema-agent-language");
@@ -69,6 +73,10 @@ export default function App() {
             {activePage === "monitor" ? <MonitorPage /> : null}
             {activePage === "eval" ? <EvalPage /> : null}
             {activePage === "memory" ? <MemoryInspectorPage /> : null}
+            {activePage === "approvals" ? <ApprovalCenterPage /> : null}
+            {activePage === "runs" ? <RunInspectorPage /> : null}
+            {activePage === "evidence" ? <EvidenceWorkbenchPage /> : null}
+            {activePage === "quality" ? <EvalConsolePage /> : null}
           </main>
         </div>
       </div>

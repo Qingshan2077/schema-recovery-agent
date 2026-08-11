@@ -1,0 +1,2 @@
+export interface EvalRun { eval_run_id: string; status: string; total_cases: number; completed_cases: number; failed_cases: number; trace_complete: boolean; started_at: string; }
+export interface GateReport { manifest: Record<string, unknown>; metrics: Record<string, number>; "gate-result": { status: string; blocking_reasons: string[]; rule_results: Array<Record<string, unknown>> }; finalization: Record<string, unknown>; }

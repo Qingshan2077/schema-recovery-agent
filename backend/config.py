@@ -124,6 +124,29 @@ class Settings(BaseSettings):
     TENANT_ID: str = "default"
     PROJECT_ID: str = "default"
     EVAL_REPORT_DIR: str = "data/eval/reports"
+    EVAL_V2_ENABLED: bool = False
+    EVAL_V2_DB_PATH: str = "data/eval/eval-v2.db"
+    EVAL_ARTIFACT_DIR: str = "data/eval/eval-artifacts"
+    EVAL_DATASET_REGISTRY_PATH: str = "data/eval/registry.json"
+    OTEL_ENABLED: bool = False
+    TRACE_DB_PATH: str = "data/observability/traces.db"
+    TRACE_PAYLOAD_CAPTURE: bool = False
+    JUDGE_V2_ENABLED: bool = False
+    CI_GATE_ENFORCED: bool = False
+    DBA_V2_ENABLED: bool = False
+    DBA_PLAN_ENABLED: bool = False
+    DBA_EXECUTION_ENABLED: bool = False
+    DBA_OPERATION_DB_PATH: str = "data/dba/operations.db"
+    DBA_OPERATION_TTL_MINUTES: int = 30
+    DBA_ALLOWED_ENVIRONMENTS: str = "dev,staging"
+    DBA_EXECUTION_CONNECTION_ALLOWLIST: str = ""
+    AGENT_WORKBENCH_ENABLED: bool = False
+    RUN_INSPECTOR_ENABLED: bool = False
+    EVIDENCE_WORKBENCH_ENABLED: bool = False
+    ER_EXPLORER_V2_ENABLED: bool = False
+    APPROVAL_CENTER_ENABLED: bool = False
+    DEPLOYMENT_GIT_SHA: str = "unknown"
+    DEPLOYMENT_DIRTY_WORKTREE: bool = True
 
     WEIGHT_CODE: float = 0.40
     WEIGHT_ORM: float = 0.25
@@ -252,6 +275,33 @@ class Config:
     TENANT_ID = settings.TENANT_ID
     PROJECT_ID = settings.PROJECT_ID
     EVAL_REPORT_DIR = settings.EVAL_REPORT_DIR
+    EVAL_V2_ENABLED = settings.EVAL_V2_ENABLED
+    EVAL_V2_DB_PATH = settings.EVAL_V2_DB_PATH
+    EVAL_ARTIFACT_DIR = settings.EVAL_ARTIFACT_DIR
+    EVAL_DATASET_REGISTRY_PATH = settings.EVAL_DATASET_REGISTRY_PATH
+    OTEL_ENABLED = settings.OTEL_ENABLED
+    TRACE_DB_PATH = settings.TRACE_DB_PATH
+    TRACE_PAYLOAD_CAPTURE = settings.TRACE_PAYLOAD_CAPTURE
+    JUDGE_V2_ENABLED = settings.JUDGE_V2_ENABLED
+    CI_GATE_ENFORCED = settings.CI_GATE_ENFORCED
+    DBA_V2_ENABLED = settings.DBA_V2_ENABLED
+    DBA_PLAN_ENABLED = settings.DBA_PLAN_ENABLED
+    DBA_EXECUTION_ENABLED = settings.DBA_EXECUTION_ENABLED
+    DBA_OPERATION_DB_PATH = settings.DBA_OPERATION_DB_PATH
+    DBA_OPERATION_TTL_MINUTES = settings.DBA_OPERATION_TTL_MINUTES
+    DBA_ALLOWED_ENVIRONMENTS = tuple(
+        item.strip() for item in settings.DBA_ALLOWED_ENVIRONMENTS.split(",") if item.strip()
+    )
+    DBA_EXECUTION_CONNECTION_ALLOWLIST = tuple(
+        item.strip() for item in settings.DBA_EXECUTION_CONNECTION_ALLOWLIST.split(",") if item.strip()
+    )
+    AGENT_WORKBENCH_ENABLED = settings.AGENT_WORKBENCH_ENABLED
+    RUN_INSPECTOR_ENABLED = settings.RUN_INSPECTOR_ENABLED
+    EVIDENCE_WORKBENCH_ENABLED = settings.EVIDENCE_WORKBENCH_ENABLED
+    ER_EXPLORER_V2_ENABLED = settings.ER_EXPLORER_V2_ENABLED
+    APPROVAL_CENTER_ENABLED = settings.APPROVAL_CENTER_ENABLED
+    DEPLOYMENT_GIT_SHA = settings.DEPLOYMENT_GIT_SHA
+    DEPLOYMENT_DIRTY_WORKTREE = settings.DEPLOYMENT_DIRTY_WORKTREE
 
     WEIGHT_CODE = settings.WEIGHT_CODE
     WEIGHT_ORM = settings.WEIGHT_ORM
